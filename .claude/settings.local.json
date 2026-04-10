@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -v \"^$\")",
+      "Bash(pip install:*)",
+      "Bash(pip show:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(python -c \"from src.main import app; print\\('Backend OK'\\)\")",
+      "Bash(python -c ':*)",
+      "Bash(python:*)"
+    ]
+  }
+}
