@@ -40,8 +40,8 @@ async def trigger_generate(
     db: AsyncSession = Depends(get_db),
 ):
     plan = await _get_plan_or_404(plan_id, current_user.id, db)
-    if plan.status not in ("draft", "failed"):
-        raise HTTPException(status_code=409, detail="Plan is already generating or active")
+    if plan.status == "generating":
+        raise HTTPException(status_code=409, detail="Plan is already generating")
     plan.status = "generating"
     await db.commit()
     job = generate_plan_async.delay(str(plan.id))
@@ -82,6 +82,8 @@ async def update_plan(
     plan = await _get_plan_or_404(plan_id, current_user.id, db)
     if body.title:
         plan.title = body.title
+    if body.goal:
+        plan.goal = body.goal
     if body.status:
         plan.status = body.status
     if body.constraints:

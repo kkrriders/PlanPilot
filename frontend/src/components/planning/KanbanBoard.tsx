@@ -1,8 +1,8 @@
 'use client'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import type { DagData } from '../../types/plan'
 import TaskUpdateModal from '../execution/TaskUpdateModal'
-import { Clock, Zap, Flag, ShieldCheck, ShieldAlert } from 'lucide-react'
+import { Clock, Zap, Flag, ShieldCheck, ShieldAlert, Filter, X, Download } from 'lucide-react'
 import clsx from 'clsx'
 
 const COLUMNS = [
@@ -37,14 +37,49 @@ interface Props {
   onTaskUpdated?: () => void
 }
 
+function exportToCsv(dag: DagData) {
+  const header = ['Name', 'Category', 'Status', 'Priority', 'Estimated Hours', 'Assigned To', 'Critical Path']
+  const rows = dag.nodes.map(n => [
+    `"${(n.data.label ?? '').replace(/"/g, '""')}"`,
+    n.data.category ?? '',
+    n.data.status ?? '',
+    n.data.priority ?? '',
+    n.data.estimated_hours ?? '',
+    n.data.assigned_to ?? '',
+    n.data.is_on_critical_path ? 'Yes' : 'No',
+  ])
+  const csv = [header, ...rows].map(r => r.join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'plan_tasks.csv'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function KanbanBoard({ dag, planId, onTaskUpdated }: Props) {
   const [selectedTask, setSelectedTask] = useState<{ id: string; data: any } | null>(null)
+  const [filterCategory, setFilterCategory] = useState<string>('')
+  const [filterAssignee, setFilterAssignee] = useState<string>('')
+  const [filterPriority, setFilterPriority] = useState<string>('')
+
+  // Derive unique filter options from dag
+  const categories = useMemo(() => [...new Set(dag.nodes.map(n => n.data.category).filter(Boolean))].sort(), [dag])
+  const assignees = useMemo(() => [...new Set(dag.nodes.map(n => n.data.assigned_to).filter(Boolean))].sort(), [dag])
+  const hasFilters = filterCategory || filterAssignee || filterPriority
+
+  const filteredNodes = useMemo(() => dag.nodes.filter(n => {
+    if (filterCategory && n.data.category !== filterCategory) return false
+    if (filterAssignee && n.data.assigned_to !== filterAssignee) return false
+    if (filterPriority && String(n.data.priority) !== filterPriority) return false
+    return true
+  }), [dag.nodes, filterCategory, filterAssignee, filterPriority])
 
   const byStatus = Object.fromEntries(COLUMNS.map(c => [c.id, [] as typeof dag.nodes]))
-  dag.nodes.forEach(node => {
+  filteredNodes.forEach(node => {
     const status = node.data.status
     if (byStatus[status]) byStatus[status].push(node)
-    // skipped tasks fall into pending visually
     else if (status === 'skipped') byStatus['pending'].push(node)
   })
 
@@ -55,6 +90,71 @@ export default function KanbanBoard({ dag, planId, onTaskUpdated }: Props) {
 
   return (
     <>
+      {/* Filter bar */}
+      <div className="flex items-center gap-2 flex-wrap mb-4 justify-between">
+        <span className="flex items-center gap-1.5 text-xs text-gray-500">
+          <Filter size={12} /> Filter:
+        </span>
+
+        {categories.length > 0 && (
+          <select
+            value={filterCategory}
+            onChange={e => setFilterCategory(e.target.value)}
+            className="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+          >
+            <option value="">All categories</option>
+            {categories.map(c => <option key={c} value={c!}>{c}</option>)}
+          </select>
+        )}
+
+        {assignees.length > 0 && (
+          <select
+            value={filterAssignee}
+            onChange={e => setFilterAssignee(e.target.value)}
+            className="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+          >
+            <option value="">All assignees</option>
+            {assignees.map(a => <option key={a} value={a!}>{a}</option>)}
+          </select>
+        )}
+
+        <select
+          value={filterPriority}
+          onChange={e => setFilterPriority(e.target.value)}
+          className="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+        >
+          <option value="">All priorities</option>
+          <option value="1">Critical</option>
+          <option value="2">High</option>
+          <option value="3">Medium</option>
+          <option value="4">Low</option>
+          <option value="5">Minimal</option>
+        </select>
+
+        {hasFilters && (
+          <button
+            onClick={() => { setFilterCategory(''); setFilterAssignee(''); setFilterPriority('') }}
+            className="flex items-center gap-1 text-xs text-gray-400 hover:text-white transition-colors"
+          >
+            <X size={11} /> Clear
+          </button>
+        )}
+
+        {hasFilters && (
+          <span className="text-xs text-gray-500 ml-1">
+            {filteredNodes.length} of {dag.nodes.length} tasks
+          </span>
+        )}
+
+        <button
+          onClick={() => exportToCsv(dag)}
+          className="flex items-center gap-1.5 ml-auto text-xs text-gray-400 hover:text-white bg-gray-900 border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition-colors"
+        >
+          <Download size={11} />
+          Export CSV
+        </button>
+      </div>
+
       <div className="flex gap-4 overflow-x-auto pb-4 min-h-[520px]">
         {visibleColumns.map(col => (
           <div key={col.id} className="flex-shrink-0 w-72">

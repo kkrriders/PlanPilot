@@ -34,23 +34,35 @@ async def compute_drift(plan_id: str, db: AsyncSession) -> DriftMetric:
     now = datetime.now(timezone.utc)
 
     # --- Schedule drift ---
+    # Measures time slippage: how late did completed tasks finish vs plan,
+    # plus a penalty for non-completed tasks that are already past their planned end.
+    total_planned_hours = sum(t.estimated_hours or 0 for t in tasks) or 1.0
+
+    slippage_hours = 0.0
+    for t in completed:
+        if t.actual_end and t.planned_end:
+            # Ensure both are timezone-aware for comparison
+            actual_end = t.actual_end if t.actual_end.tzinfo else t.actual_end.replace(tzinfo=timezone.utc)
+            planned_end = t.planned_end if t.planned_end.tzinfo else t.planned_end.replace(tzinfo=timezone.utc)
+            delta_h = (actual_end - planned_end).total_seconds() / 3600
+            slippage_hours += delta_h  # positive = late, negative = early
+
+    overdue = [
+        t for t in tasks
+        if t.planned_end and t.status not in ("completed", "skipped", "failed")
+        and (t.planned_end if t.planned_end.tzinfo else t.planned_end.replace(tzinfo=timezone.utc)) < now
+    ]
+    # Overdue tasks contribute their full estimated duration as slippage
+    overdue_slippage = sum(t.estimated_hours or 0 for t in overdue)
+    slippage_hours += overdue_slippage
+
+    schedule_drift_pct = slippage_hours / total_planned_hours
+
+    # --- Effort drift ---
+    # Measures whether completed tasks took more/less effort than estimated.
     planned_completed_hours = sum(t.estimated_hours or 0 for t in completed)
     actual_completed_hours = sum(t.actual_hours or 0 for t in completed)
 
-    schedule_drift_pct = 0.0
-    if planned_completed_hours > 0:
-        schedule_drift_pct = (actual_completed_hours - planned_completed_hours) / planned_completed_hours
-
-    # Also check tasks that are past due and not complete
-    overdue = [
-        t for t in tasks
-        if t.planned_end and t.planned_end < now and t.status not in ("completed", "skipped", "failed")
-    ]
-    if overdue and total > 0:
-        overdue_factor = len(overdue) / total
-        schedule_drift_pct = max(schedule_drift_pct, overdue_factor * 0.5)
-
-    # --- Effort drift ---
     effort_drift_pct = 0.0
     if planned_completed_hours > 0:
         effort_drift_pct = (actual_completed_hours - planned_completed_hours) / planned_completed_hours
@@ -88,7 +100,9 @@ async def compute_drift(plan_id: str, db: AsyncSession) -> DriftMetric:
         details={
             "overdue_task_count": len(overdue),
             "completed_task_count": len(completed),
+            "in_progress_task_count": len(in_progress),
             "total_task_count": total,
+            "slippage_hours": round(slippage_hours, 1),
         },
     )
     db.add(metric)

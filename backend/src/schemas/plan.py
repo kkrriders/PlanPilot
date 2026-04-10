@@ -19,6 +19,7 @@ class PlanCreate(BaseModel):
 
 class PlanUpdate(BaseModel):
     title: str | None = None
+    goal: str | None = None
     status: str | None = None
     constraints: PlanConstraints | None = None
 

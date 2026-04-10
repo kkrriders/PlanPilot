@@ -1,3 +1,4 @@
+'use client'
 import { useEffect, useState } from 'react'
 import {
   BarChart, Bar, Cell, LineChart, Line,
@@ -5,6 +6,15 @@ import {
   ResponsiveContainer, ReferenceLine,
 } from 'recharts'
 import api from '../../services/api'
+import { Brain, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+
+interface AdaptiveWeight {
+  key: string
+  value: number
+  confidence: number
+  sample_count: number
+  active: boolean
+}
 
 interface DriftMetric {
   schedule_drift_pct?: number
@@ -22,14 +32,16 @@ interface Props {
 export default function DriftAnalyticsTab({ planId, driftMetric }: Props) {
   const [velocity, setVelocity] = useState<{ date: string; tasks_completed: number }[]>([])
   const [accuracy, setAccuracy] = useState<{ name: string; estimated_hours: number; actual_hours: number }[]>([])
+  const [weights, setWeights] = useState<AdaptiveWeight[]>([])
   const [loadingCharts, setLoadingCharts] = useState(true)
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [velRes, accRes] = await Promise.all([
+        const [velRes, accRes, wRes] = await Promise.all([
           api.get(`/api/v1/analytics/plans/${planId}/velocity`),
           api.get(`/api/v1/analytics/plans/${planId}/accuracy`),
+          api.get('/api/v1/analytics/weights'),
         ])
         setVelocity(velRes.data.velocity)
         setAccuracy(
@@ -39,6 +51,7 @@ export default function DriftAnalyticsTab({ planId, driftMetric }: Props) {
             actual_hours: t.actual_hours,
           }))
         )
+        setWeights(wRes.data.weights)
       } catch {
         // silently ignore — no completed tasks yet
       } finally {
@@ -47,6 +60,8 @@ export default function DriftAnalyticsTab({ planId, driftMetric }: Props) {
     }
     load()
   }, [planId])
+
+  const activeWeights = weights.filter(w => w.active && w.key !== 'effort_estimation_bias')
 
   const driftBars = driftMetric
     ? [
@@ -159,8 +174,52 @@ export default function DriftAnalyticsTab({ planId, driftMetric }: Props) {
         </div>
       )}
 
+      {/* Adaptive learning insights */}
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Brain size={15} className="text-purple-400" />
+          <h3 className="text-sm font-semibold text-white">AI Learnings</h3>
+          <span className="text-xs text-gray-500">— what the model has learned about your estimation patterns</span>
+        </div>
+
+        {activeWeights.length === 0 ? (
+          <p className="text-sm text-gray-500">
+            No patterns detected yet. Complete tasks with actual hours logged across at least 3 plans to activate adaptive adjustments.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {activeWeights.map(w => {
+              const category = w.key.replace('category_bias_', '')
+              const bias = (w.value - 1.0) * 100
+              const over = bias > 0
+              const Icon = Math.abs(bias) < 5 ? Minus : over ? TrendingUp : TrendingDown
+              const color = Math.abs(bias) < 5 ? 'text-gray-400' : over ? 'text-amber-400' : 'text-emerald-400'
+              const confidence = Math.round(w.confidence * 100)
+              return (
+                <div key={w.key} className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <Icon size={13} className={color} />
+                    <span className="text-sm text-white capitalize">{category}</span>
+                    <span className="text-xs text-gray-500">tasks</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className={`font-medium ${color}`}>
+                      {over ? '+' : ''}{bias.toFixed(0)}% vs estimate
+                    </span>
+                    <span className="text-gray-600">{w.sample_count} samples · {confidence}% confidence</span>
+                  </div>
+                </div>
+              )
+            })}
+            <p className="text-[11px] text-gray-600 pt-1">
+              These patterns are automatically applied to new plan estimates when generating.
+            </p>
+          </div>
+        )}
+      </div>
+
       {!loadingCharts && accuracy.length === 0 && velocity.length === 0 && (
-        <div className="text-center py-10 text-gray-500 text-sm">
+        <div className="text-center py-6 text-gray-500 text-sm">
           Charts will appear once tasks are completed and actual hours are logged.
         </div>
       )}

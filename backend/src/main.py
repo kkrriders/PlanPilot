@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.core.config import get_settings
 from src.routes import auth, plans, tasks, execution, drift, analytics
-from src.routes import team
+from src.routes import team, simulation
 
 settings = get_settings()
 
@@ -28,6 +28,7 @@ app.include_router(execution.router, prefix="/api/v1")
 app.include_router(drift.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(team.router, prefix="/api/v1")
+app.include_router(simulation.router, prefix="/api/v1")
 
 
 @app.get("/health")

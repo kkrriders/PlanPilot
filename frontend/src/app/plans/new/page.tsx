@@ -7,6 +7,7 @@ import { usePlanStore } from '@/store/planStore'
 import { Zap, ChevronRight, Users, X } from 'lucide-react'
 import AuthGuard from '@/components/shared/AuthGuard'
 import TeamMemberForm from '@/components/planning/TeamMemberForm'
+import PlanTemplates from '@/components/planning/PlanTemplates'
 import type { TeamMemberCreate } from '@/types/team'
 
 const MEMBER_COLORS = [
@@ -82,6 +83,16 @@ function PlanCreateContent() {
       <h1 className="text-2xl font-bold text-white mb-6">New Plan</h1>
 
       <form onSubmit={handleSubmit} className="space-y-5">
+        <PlanTemplates onSelect={t => setForm(f => ({
+          ...f,
+          goal: t.goal,
+          deadline_days: t.deadline_days,
+          team_size: t.team_size,
+          budget_usd: t.budget_usd,
+          tech_stack: t.tech_stack,
+          notes: t.notes,
+          title: f.title || t.label,
+        }))} />
         {/* Goal & Context */}
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 space-y-4">
           <h2 className="font-semibold text-white flex items-center gap-2">
