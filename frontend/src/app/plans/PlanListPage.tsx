@@ -22,7 +22,19 @@ export default function PlanListPage() {
         </Link>
       </div>
 
-      {loading && <p className="text-gray-400">Loading...</p>}
+      {loading && (
+        <div className="space-y-2 animate-pulse">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="flex items-center justify-between p-4 bg-gray-900 border border-gray-700 rounded-xl">
+              <div className="space-y-2 flex-1">
+                <div className="h-4 w-48 bg-gray-800 rounded" />
+                <div className="h-3 w-72 bg-gray-800 rounded" />
+              </div>
+              <div className="h-5 w-16 bg-gray-800 rounded-full ml-4" />
+            </div>
+          ))}
+        </div>
+      )}
 
       {!loading && plans.length === 0 && (
         <div className="text-center py-16 bg-gray-900 border border-gray-700 rounded-xl">

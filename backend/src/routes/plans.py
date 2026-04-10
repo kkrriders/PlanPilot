@@ -134,6 +134,7 @@ async def get_dag(
                 "label": t.name, "category": t.category, "status": t.status,
                 "estimated_hours": t.estimated_hours, "priority": t.priority,
                 "is_on_critical_path": t.is_on_critical_path,
+                "description": t.description,
             },
             "type": "taskNode",
         }

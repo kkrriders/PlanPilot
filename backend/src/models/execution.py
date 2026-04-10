@@ -21,6 +21,8 @@ class ExecutionLog(Base):
     new_status: Mapped[str | None] = mapped_column(String, nullable=True)
     pct_complete: Mapped[float] = mapped_column(Float, default=0.0)
     note: Mapped[str | None] = mapped_column(String, nullable=True)
+    evidence_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    compliance_flags: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     logged_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     logged_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

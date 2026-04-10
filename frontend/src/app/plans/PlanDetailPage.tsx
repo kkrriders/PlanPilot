@@ -6,6 +6,7 @@ import DagVisualization from '../../components/planning/DagVisualization'
 import ExecutionTimeline from '../../components/execution/ExecutionTimeline'
 import DriftAlertBanner from '../../components/execution/DriftAlertBanner'
 import ReplanningModal from '../../components/execution/ReplanningModal'
+import DriftAnalyticsTab from '../../components/execution/DriftAnalyticsTab'
 import { executionService } from '../../services/executionService'
 import { Activity, GitBranch, BarChart3, RefreshCw } from 'lucide-react'
 
@@ -46,7 +47,7 @@ export default function PlanDetailPage() {
     }
   }, [currentPlan?.status, planId])
 
-  if (!currentPlan) return <div className="text-gray-400">Loading...</div>
+  if (!currentPlan) return <PlanDetailSkeleton />
 
   const isGenerating = currentPlan.status === 'generating'
 
@@ -145,20 +146,8 @@ export default function PlanDetailPage() {
         </div>
       )}
 
-      {tab === 'drift' && driftMetric && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { label: 'Schedule Drift', value: `${driftMetric.schedule_drift_pct?.toFixed(1)}%` },
-            { label: 'Effort Drift', value: `${driftMetric.effort_drift_pct?.toFixed(1)}%` },
-            { label: 'Scope Drift', value: `${driftMetric.scope_drift_pct?.toFixed(1)}%` },
-            { label: 'Overall Drift', value: `${driftMetric.overall_drift?.toFixed(1)}%` },
-          ].map(({ label, value }) => (
-            <div key={label} className="bg-gray-900 border border-gray-700 rounded-xl p-4">
-              <p className="text-xs text-gray-400">{label}</p>
-              <p className="text-2xl font-bold text-white mt-1">{value}</p>
-            </div>
-          ))}
-        </div>
+      {tab === 'drift' && (
+        <DriftAnalyticsTab planId={planId!} driftMetric={driftMetric} />
       )}
 
       {/* Replan modal */}
@@ -170,6 +159,22 @@ export default function PlanDetailPage() {
           loading={applyingReplan}
         />
       )}
+    </div>
+  )
+}
+
+function PlanDetailSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="flex items-start justify-between">
+        <div className="space-y-2">
+          <div className="h-7 w-64 bg-gray-800 rounded" />
+          <div className="h-4 w-96 bg-gray-800 rounded" />
+        </div>
+        <div className="h-6 w-20 bg-gray-800 rounded-full" />
+      </div>
+      <div className="h-10 w-72 bg-gray-800 rounded-lg" />
+      <div className="h-96 bg-gray-900 border border-gray-700 rounded-xl" />
     </div>
   )
 }

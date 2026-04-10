@@ -10,7 +10,11 @@ export const executionService = {
     pct_complete: number
     note?: string
     new_status?: string
+    evidence_url?: string
   }) => api.post(`/api/v1/plans/${planId}/execution/tasks/${taskId}/log`, data).then(r => r.data),
+
+  getComplianceViolations: (planId: string) =>
+    api.get(`/api/v1/plans/${planId}/execution/compliance`).then(r => r.data),
 
   getTimeline: (planId: string) =>
     api.get<TimelineEntry[]>(`/api/v1/plans/${planId}/execution/timeline`).then(r => r.data),

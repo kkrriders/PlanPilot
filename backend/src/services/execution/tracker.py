@@ -19,6 +19,8 @@ async def log_event(
     new_status: str | None,
     user_id: uuid.UUID,
     db: AsyncSession,
+    evidence_url: str | None = None,
+    compliance_flags: list | None = None,
 ) -> ExecutionLog:
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
@@ -50,6 +52,8 @@ async def log_event(
         new_status=task.status,
         pct_complete=pct_complete,
         note=note,
+        evidence_url=evidence_url,
+        compliance_flags=compliance_flags or [],
         logged_by=user_id,
     )
     db.add(log)

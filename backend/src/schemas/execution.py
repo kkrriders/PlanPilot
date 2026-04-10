@@ -8,6 +8,7 @@ class LogEventCreate(BaseModel):
     pct_complete: float = Field(ge=0, le=100, default=0)
     note: str | None = None
     new_status: str | None = None
+    evidence_url: str | None = None
 
 
 class ExecutionLogOut(BaseModel):
@@ -19,6 +20,8 @@ class ExecutionLogOut(BaseModel):
     new_status: str | None
     pct_complete: float
     note: str | None
+    evidence_url: str | None
+    compliance_flags: list
     logged_at: datetime
 
     model_config = {"from_attributes": True}

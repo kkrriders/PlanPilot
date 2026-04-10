@@ -12,6 +12,7 @@ from src.models.task import Task
 from src.models.execution import ExecutionLog, Checkpoint
 from src.schemas.execution import LogEventCreate, ExecutionLogOut, CheckpointCreate, CheckpointOut
 from src.services.execution.tracker import log_event, get_timeline
+from src.services.compliance.checker import run_compliance_checks, split_violations
 
 router = APIRouter(prefix="/plans/{plan_id}/execution", tags=["execution"])
 
@@ -39,18 +40,73 @@ async def log_task_event(
     db: AsyncSession = Depends(get_db),
 ):
     await _check_plan_ownership(plan_id, current_user.id, db)
+
+    # Run compliance checks
+    violations = await run_compliance_checks(
+        task_id=task_id,
+        event_type=body.event_type,
+        note=body.note,
+        evidence_url=body.evidence_url,
+        db=db,
+    )
+    errors, warnings = split_violations(violations)
+
+    if errors:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "compliance_errors": [e.to_dict() for e in errors],
+                "message": errors[0].message,
+            },
+        )
+
     log = await log_event(
         task_id=task_id,
         plan_id=plan_id,
         event_type=body.event_type,
         pct_complete=body.pct_complete,
         note=body.note,
+        evidence_url=body.evidence_url,
         new_status=body.new_status,
+        compliance_flags=[w.to_dict() for w in warnings],
         user_id=current_user.id,
         db=db,
     )
     await db.commit()
     return log
+
+
+@router.get("/compliance")
+async def get_compliance_violations(
+    plan_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns all execution logs with compliance warnings/flags for this plan."""
+    await _check_plan_ownership(plan_id, current_user.id, db)
+    from sqlalchemy import cast
+    from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+
+    result = await db.execute(
+        select(ExecutionLog, Task.name.label("task_name"))
+        .join(Task, Task.id == ExecutionLog.task_id)
+        .where(
+            ExecutionLog.plan_id == plan_id,
+            ExecutionLog.compliance_flags != cast([], PG_JSONB),
+        )
+        .order_by(ExecutionLog.logged_at.desc())
+    )
+    rows = result.all()
+    return [
+        {
+            "log_id": str(row.ExecutionLog.id),
+            "task_name": row.task_name,
+            "event_type": row.ExecutionLog.event_type,
+            "logged_at": row.ExecutionLog.logged_at.isoformat(),
+            "flags": row.ExecutionLog.compliance_flags,
+        }
+        for row in rows
+    ]
 
 
 @router.get("/timeline")

@@ -8,7 +8,8 @@
       "Bash(npx tsc:*)",
       "Bash(python -c \"from src.main import app; print\\('Backend OK'\\)\")",
       "Bash(python -c ':*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(grep:*)"
     ]
   }
 }

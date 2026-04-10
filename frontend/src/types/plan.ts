@@ -45,6 +45,7 @@ export interface DagNode {
     estimated_hours?: number
     priority: number
     is_on_critical_path: boolean
+    description?: string
   }
   position?: { x: number; y: number }
 }

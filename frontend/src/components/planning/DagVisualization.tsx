@@ -39,10 +39,19 @@ function TaskNode({ data }: { data: any }) {
   const statusClass = STATUS_COLORS[data.status] || STATUS_COLORS.pending
   const catColor = CATEGORY_COLORS[data.category] || '#6b7280'
 
+  // Convert description into bullet points (split on period, semicolon, or newline)
+  const bullets: string[] = data.description
+    ? data.description
+        .split(/[.;\n]+/)
+        .map((s: string) => s.trim())
+        .filter((s: string) => s.length > 4)
+        .slice(0, 3)
+    : []
+
   return (
     <div
       className={clsx(
-        'px-3 py-2 rounded-lg border-2 min-w-[140px] max-w-[180px] text-xs shadow-lg',
+        'px-3 py-2 rounded-lg border-2 min-w-[160px] max-w-[210px] text-xs shadow-lg',
         statusClass,
         data.is_on_critical_path && 'ring-2 ring-yellow-400 ring-offset-1 ring-offset-gray-950'
       )}
@@ -59,8 +68,18 @@ function TaskNode({ data }: { data: any }) {
         )}
       </div>
       <p className="font-medium text-white leading-tight">{data.label}</p>
+      {bullets.length > 0 && (
+        <ul className="mt-1.5 space-y-0.5">
+          {bullets.map((b, i) => (
+            <li key={i} className="flex items-start gap-1 text-[9px] text-gray-400 leading-tight">
+              <span className="text-gray-500 mt-0.5 flex-shrink-0">•</span>
+              <span className="line-clamp-1">{b}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {data.estimated_hours && (
-        <p className="text-gray-400 mt-1">{data.estimated_hours}h</p>
+        <p className="text-gray-500 mt-1.5 text-[10px]">{data.estimated_hours}h</p>
       )}
       <Handle type="source" position={Position.Right} className="!bg-gray-400" />
     </div>
@@ -104,7 +123,7 @@ function layoutNodes(nodes: Node[], edges: Edge[]): Node[] {
     ids.forEach((id, row) => {
       positioned[id] = {
         ...positioned[id],
-        position: { x: Number(col) * 220, y: row * 90 },
+        position: { x: Number(col) * 250, y: row * 110 },
       }
     })
   })

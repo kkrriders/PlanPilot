@@ -1,16 +1,18 @@
-import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { useAuthStore } from '../../store/authStore'
+'use client'
+import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
+import { useAuthStore } from '@/store/authStore'
 import { LayoutDashboard, FolderKanban, LogOut, Zap } from 'lucide-react'
 import clsx from 'clsx'
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { logout } = useAuthStore()
-  const navigate = useNavigate()
-  const location = useLocation()
+  const router = useRouter()
+  const pathname = usePathname()
 
   const nav = [
-    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/plans', label: 'Plans', icon: FolderKanban },
+    { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { href: '/plans', label: 'Plans', icon: FolderKanban },
   ]
 
   return (
@@ -22,13 +24,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <span className="font-bold text-lg text-white">PlanPilot</span>
         </div>
         <nav className="flex-1 p-3 space-y-1">
-          {nav.map(({ to, label, icon: Icon }) => (
+          {nav.map(({ href, label, icon: Icon }) => (
             <Link
-              key={to}
-              to={to}
+              key={href}
+              href={href}
               className={clsx(
                 'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
-                location.pathname.startsWith(to)
+                pathname.startsWith(href)
                   ? 'bg-blue-600 text-white'
                   : 'text-gray-400 hover:bg-gray-800 hover:text-white'
               )}
@@ -39,7 +41,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
         <button
-          onClick={() => { logout(); navigate('/login') }}
+          onClick={() => { logout(); router.push('/login') }}
           className="m-3 flex items-center gap-2 px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
         >
           <LogOut size={16} />

@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
 })
 
 // Attach access token to every request
@@ -20,7 +20,7 @@ api.interceptors.response.use(
       if (refresh) {
         try {
           const { data } = await axios.post(
-            `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/auth/refresh`,
+            `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/auth/refresh`,
             { refresh_token: refresh }
           )
           localStorage.setItem('access_token', data.access_token)
