@@ -46,6 +46,7 @@ export interface DagNode {
     priority: number
     is_on_critical_path: boolean
     description?: string
+    assigned_to?: string | null
   }
   position?: { x: number; y: number }
 }

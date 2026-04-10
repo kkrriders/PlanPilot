@@ -108,7 +108,7 @@ export default function KanbanBoard({ dag, planId, onTaskUpdated }: Props) {
 }
 
 function TaskCard({ node, onClick }: { node: any; onClick: () => void }) {
-  const { label, category, status, estimated_hours, priority, is_on_critical_path, description } = node.data
+  const { label, category, status, estimated_hours, priority, is_on_critical_path, description, assigned_to } = node.data
 
   const catCls = CATEGORY_COLORS[category] || 'bg-gray-800 text-gray-300'
   const priorityInfo = PRIORITY_LABELS[priority] || PRIORITY_LABELS[3]
@@ -171,6 +171,14 @@ function TaskCard({ node, onClick }: { node: any; onClick: () => void }) {
           </span>
         </div>
         <div className="flex items-center gap-1.5">
+          {assigned_to && (
+            <div
+              className="w-5 h-5 rounded-full bg-blue-700 flex items-center justify-center text-[9px] font-bold text-white"
+              title={assigned_to}
+            >
+              {assigned_to.charAt(0).toUpperCase()}
+            </div>
+          )}
           {status === 'completed' && (
             <ShieldCheck size={12} className="text-green-400" title="Completed with evidence" />
           )}

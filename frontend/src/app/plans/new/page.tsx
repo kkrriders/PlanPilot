@@ -2,9 +2,17 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { planService } from '@/services/planService'
+import { teamService } from '@/services/teamService'
 import { usePlanStore } from '@/store/planStore'
-import { Zap, ChevronRight } from 'lucide-react'
+import { Zap, ChevronRight, Users, X } from 'lucide-react'
 import AuthGuard from '@/components/shared/AuthGuard'
+import TeamMemberForm from '@/components/planning/TeamMemberForm'
+import type { TeamMemberCreate } from '@/types/team'
+
+const MEMBER_COLORS = [
+  '#3b82f6', '#10b981', '#f59e0b', '#ef4444',
+  '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16',
+]
 
 function PlanCreateContent() {
   const router = useRouter()
@@ -22,11 +30,25 @@ function PlanCreateContent() {
     notes: '',
   })
 
+  const [pendingMembers, setPendingMembers] = useState<(TeamMemberCreate & { _localId: string })[]>([])
+
+  const handleAddMember = (member: TeamMemberCreate) => {
+    setPendingMembers(prev => [
+      ...prev,
+      { ...member, color: MEMBER_COLORS[prev.length % MEMBER_COLORS.length], _localId: crypto.randomUUID() },
+    ])
+  }
+
+  const handleRemoveMember = (localId: string) => {
+    setPendingMembers(prev => prev.filter(m => m._localId !== localId))
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
+      // 1. Create plan as draft
       const plan = await planService.create(form.title, form.goal, {
         deadline_days: form.deadline_days ? Number(form.deadline_days) : undefined,
         team_size: form.team_size ? Number(form.team_size) : undefined,
@@ -34,6 +56,16 @@ function PlanCreateContent() {
         tech_stack: form.tech_stack ? form.tech_stack.split(',').map(s => s.trim()) : [],
         notes: form.notes || undefined,
       })
+
+      // 2. Add team members
+      for (const m of pendingMembers) {
+        const { _localId, ...body } = m
+        await teamService.add(plan.id, body)
+      }
+
+      // 3. Trigger generation
+      await planService.generate(plan.id)
+
       router.push(`/plans/${plan.id}`)
       pollPlanStatus(plan.id, () => {})
     } catch (err: any) {
@@ -50,6 +82,7 @@ function PlanCreateContent() {
       <h1 className="text-2xl font-bold text-white mb-6">New Plan</h1>
 
       <form onSubmit={handleSubmit} className="space-y-5">
+        {/* Goal & Context */}
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 space-y-4">
           <h2 className="font-semibold text-white flex items-center gap-2">
             <Zap size={16} className="text-blue-400" />
@@ -79,6 +112,7 @@ function PlanCreateContent() {
           </Field>
         </div>
 
+        {/* Constraints */}
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 space-y-4">
           <h2 className="font-semibold text-white">Constraints</h2>
 
@@ -102,6 +136,46 @@ function PlanCreateContent() {
           </Field>
         </div>
 
+        {/* Team Members */}
+        <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-white flex items-center gap-2">
+              <Users size={16} className="text-blue-400" />
+              Team Members
+              <span className="text-xs text-gray-500 font-normal">(optional — enables skill-based task assignment)</span>
+            </h2>
+          </div>
+
+          {/* Member list */}
+          {pendingMembers.length > 0 && (
+            <div className="space-y-2">
+              {pendingMembers.map(m => (
+                <div key={m._localId} className="flex items-center gap-3 bg-gray-800 rounded-lg px-3 py-2">
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                    style={{ backgroundColor: m.color }}
+                  >
+                    {m.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-white font-medium truncate">{m.name}</p>
+                    <p className="text-xs text-gray-400 truncate">{m.role}{m.skills.length > 0 ? ` · ${m.skills.join(', ')}` : ''}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveMember(m._localId)}
+                    className="text-gray-500 hover:text-red-400 transition-colors flex-shrink-0"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <TeamMemberForm onAdd={handleAddMember} />
+        </div>
+
         <button
           type="submit"
           disabled={loading}
@@ -113,7 +187,7 @@ function PlanCreateContent() {
         {loading && (
           <p className="text-sm text-gray-400 flex items-center gap-2">
             <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
-            AI is analyzing your goal and creating a task breakdown with DAG...
+            AI is analyzing your goal and creating a task breakdown with skill-based assignments...
           </p>
         )}
       </form>

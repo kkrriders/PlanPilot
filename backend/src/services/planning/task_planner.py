@@ -14,6 +14,7 @@ from src.services.planning.plan_evaluator import evaluate_plan
 from src.models.plan import Plan, PlanVersion
 from src.models.task import Task, TaskDependency
 from src.models.learning import AdaptiveWeight
+from src.models.team import TeamMember
 
 
 async def generate_plan(plan_id: str, db: AsyncSession) -> None:
@@ -28,8 +29,9 @@ async def generate_plan(plan_id: str, db: AsyncSession) -> None:
 
     constraints = plan.constraints
 
-    # Load adaptive weights for this user
+    # Load adaptive weights and team members
     adaptive_context = await _load_adaptive_context(str(plan.user_id), db)
+    team_context = await _load_team_context(plan_id, db)
 
     # Call LLM
     prompt = DECOMPOSITION_USER.format(
@@ -39,6 +41,7 @@ async def generate_plan(plan_id: str, db: AsyncSession) -> None:
         budget_usd=constraints.get("budget_usd", "not specified"),
         tech_stack=", ".join(constraints.get("tech_stack", [])) or "not specified",
         notes=constraints.get("notes", "none"),
+        team_context=team_context,
         adaptive_context=adaptive_context,
     )
 
@@ -145,6 +148,20 @@ async def generate_plan(plan_id: str, db: AsyncSession) -> None:
     plan.confidence = confidence
 
     await db.commit()
+
+
+async def _load_team_context(plan_id: str, db: AsyncSession) -> str:
+    result = await db.execute(
+        select(TeamMember).where(TeamMember.plan_id == uuid.UUID(plan_id))
+    )
+    members = result.scalars().all()
+    if not members:
+        return "No team members defined — leave assigned_to as null."
+    lines = []
+    for m in members:
+        skills_str = ", ".join(m.skills) if m.skills else "general"
+        lines.append(f"- {m.name} ({m.role}): {skills_str}")
+    return "\n".join(lines)
 
 
 async def _load_adaptive_context(user_id: str, db: AsyncSession) -> str:

@@ -14,6 +14,9 @@ CONSTRAINTS:
 - Tech stack: {tech_stack}
 - Notes: {notes}
 
+TEAM MEMBERS & SKILLS:
+{team_context}
+
 ADAPTIVE CONTEXT (learned from past projects):
 {adaptive_context}
 
@@ -27,7 +30,7 @@ Return a JSON object with this exact structure:
       "estimated_hours": 8.0,
       "priority": 2,
       "dependencies": ["name of predecessor task", ...],
-      "assigned_to": null
+      "assigned_to": "Exact team member name or null if no team defined"
     }}
   ]
 }}
@@ -38,7 +41,10 @@ Rules:
 - Dependencies reference other task names exactly
 - No circular dependencies
 - Include all necessary tasks from kickoff to deployment/completion
-- Generate 8-20 tasks depending on project complexity"""
+- Generate 8-20 tasks depending on project complexity
+- If team members are listed, assign each task to the member whose skills best match the work
+- Use EXACT team member names in "assigned_to" — do not invent names
+- Distribute tasks across team members to balance workload"""
 
 RISK_SYSTEM = """You are a risk assessment expert for software projects.
 Analyze the project plan and provide risk and confidence scores.

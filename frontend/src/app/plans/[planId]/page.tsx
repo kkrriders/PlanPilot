@@ -4,15 +4,16 @@ import { useParams } from 'next/navigation'
 import { usePlanStore } from '@/store/planStore'
 import { useExecutionStore } from '@/store/executionStore'
 import KanbanBoard from '@/components/planning/KanbanBoard'
+import TeamTab from '@/components/planning/TeamTab'
 import ExecutionTimeline from '@/components/execution/ExecutionTimeline'
 import DriftAlertBanner from '@/components/execution/DriftAlertBanner'
 import ReplanningModal from '@/components/execution/ReplanningModal'
 import DriftAnalyticsTab from '@/components/execution/DriftAnalyticsTab'
 import { executionService } from '@/services/executionService'
-import { Activity, LayoutDashboard, BarChart3, RefreshCw } from 'lucide-react'
+import { Activity, LayoutDashboard, BarChart3, RefreshCw, Users } from 'lucide-react'
 import AuthGuard from '@/components/shared/AuthGuard'
 
-type Tab = 'board' | 'timeline' | 'drift'
+type Tab = 'board' | 'timeline' | 'drift' | 'team'
 
 function PlanDetailContent() {
   const params = useParams<{ planId: string }>()
@@ -110,6 +111,7 @@ function PlanDetailContent() {
         {([
           { id: 'board', label: 'Board', icon: LayoutDashboard },
           { id: 'timeline', label: 'Timeline', icon: Activity },
+          { id: 'team', label: 'Team', icon: Users },
           { id: 'drift', label: 'Analytics', icon: BarChart3 },
         ] as const).map(({ id, label, icon: Icon }) => (
           <button
@@ -151,6 +153,10 @@ function PlanDetailContent() {
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
           <ExecutionTimeline timeline={timeline} />
         </div>
+      )}
+
+      {tab === 'team' && (
+        <TeamTab planId={planId!} dag={currentDag} />
       )}
 
       {tab === 'drift' && (

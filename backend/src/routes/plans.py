@@ -25,13 +25,25 @@ async def create_plan(
         title=body.title,
         goal=body.goal,
         constraints=body.constraints.model_dump(),
-        status="generating",
+        status="draft",
     )
     db.add(plan)
     await db.commit()
     await db.refresh(plan)
+    return plan
 
-    # Enqueue async planning job
+
+@router.post("/{plan_id}/generate", response_model=PlanOut)
+async def trigger_generate(
+    plan_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    plan = await _get_plan_or_404(plan_id, current_user.id, db)
+    if plan.status not in ("draft", "failed"):
+        raise HTTPException(status_code=409, detail="Plan is already generating or active")
+    plan.status = "generating"
+    await db.commit()
     job = generate_plan_async.delay(str(plan.id))
     plan.job_id = job.id
     await db.commit()
@@ -135,6 +147,7 @@ async def get_dag(
                 "estimated_hours": t.estimated_hours, "priority": t.priority,
                 "is_on_critical_path": t.is_on_critical_path,
                 "description": t.description,
+                "assigned_to": t.assigned_to,
             },
             "type": "taskNode",
         }

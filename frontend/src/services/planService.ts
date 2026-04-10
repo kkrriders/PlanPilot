@@ -15,6 +15,8 @@ export const planService = {
 
   getVersions: (id: string) => api.get<PlanVersion[]>(`/api/v1/plans/${id}/versions`).then(r => r.data),
 
+  generate: (id: string) => api.post<Plan>(`/api/v1/plans/${id}/generate`).then(r => r.data),
+
   update: (id: string, data: Partial<Plan>) => api.patch<Plan>(`/api/v1/plans/${id}`, data).then(r => r.data),
 
   delete: (id: string) => api.delete(`/api/v1/plans/${id}`),
