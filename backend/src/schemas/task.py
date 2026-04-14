@@ -1,6 +1,9 @@
 from pydantic import BaseModel
+from typing import Literal
 import uuid
 from datetime import datetime
+
+TaskStatus = Literal["pending", "in_progress", "blocked", "completed", "skipped", "failed"]
 
 
 class TaskCreate(BaseModel):
@@ -16,7 +19,7 @@ class TaskCreate(BaseModel):
 class TaskUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
-    status: str | None = None
+    status: TaskStatus | None = None
     priority: int | None = None
     estimated_hours: float | None = None
     actual_hours: float | None = None

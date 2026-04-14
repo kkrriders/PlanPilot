@@ -35,6 +35,9 @@ def build_dag(
     Returns:
         (scheduled_tasks, critical_path_ids)
     """
+    if not raw_tasks:
+        raise ValueError("LLM returned an empty task list")
+
     if project_start is None:
         project_start = datetime.now(timezone.utc)
 

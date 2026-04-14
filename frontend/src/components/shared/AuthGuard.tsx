@@ -5,16 +5,20 @@ import { useAuthStore } from '@/store/authStore'
 import Layout from './Layout'
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuthStore()
+  const { isAuthenticated, isRehydrated, rehydrate } = useAuthStore()
   const router = useRouter()
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    rehydrate()
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (isRehydrated && !isAuthenticated) {
       router.replace('/login')
     }
-  }, [isAuthenticated, router])
+  }, [isAuthenticated, isRehydrated, router])
 
-  if (!isAuthenticated) return null
+  if (!isRehydrated) return null
 
   return <Layout>{children}</Layout>
 }

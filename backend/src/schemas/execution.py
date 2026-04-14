@@ -1,13 +1,17 @@
 from pydantic import BaseModel, Field
+from typing import Literal
 import uuid
 from datetime import datetime
 
+EventType = Literal["started", "progress", "blocked", "completed", "failed", "comment"]
+TaskStatus = Literal["pending", "in_progress", "blocked", "completed", "skipped", "failed"]
+
 
 class LogEventCreate(BaseModel):
-    event_type: str
+    event_type: EventType
     pct_complete: float = Field(ge=0, le=100, default=0)
     note: str | None = None
-    new_status: str | None = None
+    new_status: TaskStatus | None = None
     evidence_url: str | None = None
 
 

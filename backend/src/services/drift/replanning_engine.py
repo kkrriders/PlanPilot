@@ -68,9 +68,12 @@ async def apply_replan(plan_id: str, preview: dict, db: AsyncSession) -> PlanVer
     """
     plan_result = await db.execute(select(Plan).where(Plan.id == plan_id))
     plan = plan_result.scalar_one_or_none()
+    if not plan:
+        raise ValueError(f"Plan {plan_id} not found")
 
-    scheduled_new = preview.pop("_scheduled_new")
-    new_critical_path_ids = preview.pop("_new_critical_path_ids")
+    # Use copies to avoid mutating the caller's dict
+    scheduled_new = preview["_scheduled_new"]
+    new_critical_path_ids = preview["_new_critical_path_ids"]
 
     # Mark removed tasks as skipped
     removed_names = {r["name"] for r in preview["removed"]}
@@ -114,11 +117,11 @@ async def apply_replan(plan_id: str, preview: dict, db: AsyncSession) -> PlanVer
             db.add(dep)
 
     # Mark drift events as replanned
+    from sqlalchemy import update
     await db.execute(
-        select(DriftEvent).where(
-            DriftEvent.plan_id == plan.id,
-            DriftEvent.was_replanned == False,  # noqa: E712
-        )
+        update(DriftEvent)
+        .where(DriftEvent.plan_id == plan.id, DriftEvent.was_replanned == False)  # noqa: E712
+        .values(was_replanned=True)
     )
 
     # Build snapshot
@@ -152,6 +155,8 @@ async def apply_replan(plan_id: str, preview: dict, db: AsyncSession) -> PlanVer
 async def _load_plan_state(plan_id: str, db: AsyncSession):
     plan_result = await db.execute(select(Plan).where(Plan.id == plan_id))
     plan = plan_result.scalar_one_or_none()
+    if not plan:
+        raise ValueError(f"Plan {plan_id} not found")
 
     task_result = await db.execute(select(Task).where(Task.plan_id == plan.id))
     all_tasks = task_result.scalars().all()

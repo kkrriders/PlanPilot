@@ -1,6 +1,9 @@
 from pydantic import BaseModel, Field
+from typing import Literal
 import uuid
 from datetime import datetime
+
+PlanStatus = Literal["draft", "generating", "active", "paused", "completed", "failed"]
 
 
 class PlanConstraints(BaseModel):
@@ -12,15 +15,15 @@ class PlanConstraints(BaseModel):
 
 
 class PlanCreate(BaseModel):
-    title: str
-    goal: str
+    title: str = Field(min_length=1, max_length=200)
+    goal: str = Field(min_length=10, max_length=2000)
     constraints: PlanConstraints = PlanConstraints()
 
 
 class PlanUpdate(BaseModel):
     title: str | None = None
     goal: str | None = None
-    status: str | None = None
+    status: PlanStatus | None = None
     constraints: PlanConstraints | None = None
 
 

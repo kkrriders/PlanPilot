@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import uuid
@@ -10,8 +10,17 @@ from src.models.plan import Plan, PlanVersion
 from src.models.task import Task, TaskDependency
 from src.schemas.plan import PlanCreate, PlanUpdate, PlanOut, PlanVersionOut, DagOut
 from src.workers.planning_tasks import generate_plan_async
+from src.core.limiter import limiter
 
 router = APIRouter(prefix="/plans", tags=["plans"])
+
+# Allowed manual status transitions via PATCH (generating/failed set by system only)
+_ALLOWED_STATUS_TRANSITIONS: dict[str, set[str]] = {
+    "draft": {"active"},
+    "active": {"paused", "completed"},
+    "paused": {"active", "completed"},
+    "failed": {"draft"},
+}
 
 
 @router.post("", response_model=PlanOut, status_code=201)
@@ -39,12 +48,19 @@ async def trigger_generate(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    plan = await _get_plan_or_404(plan_id, current_user.id, db)
+    # SELECT FOR UPDATE prevents double-trigger race condition
+    result = await db.execute(
+        select(Plan)
+        .where(Plan.id == plan_id, Plan.user_id == current_user.id)
+        .with_for_update()
+    )
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
     if plan.status == "generating":
         raise HTTPException(status_code=409, detail="Plan is already generating")
-    plan.status = "generating"
-    await db.commit()
     job = generate_plan_async.delay(str(plan.id))
+    plan.status = "generating"
     plan.job_id = job.id
     await db.commit()
     await db.refresh(plan)
@@ -85,6 +101,12 @@ async def update_plan(
     if body.goal:
         plan.goal = body.goal
     if body.status:
+        allowed = _ALLOWED_STATUS_TRANSITIONS.get(plan.status, set())
+        if body.status not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot transition plan from '{plan.status}' to '{body.status}'",
+            )
         plan.status = body.status
     if body.constraints:
         plan.constraints = body.constraints.model_dump()

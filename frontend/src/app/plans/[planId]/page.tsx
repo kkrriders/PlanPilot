@@ -51,23 +51,15 @@ function PlanDetailContent() {
     fetchDag(planId)
     fetchTimeline(planId)
     fetchDrift(planId)
+  }, [planId])
 
-    const plan = currentPlan
-    if (plan?.status === 'generating') {
-      pollPlanStatus(planId, () => {
+  // Single polling mechanism — returns cleanup to stop on unmount or status change
+  useEffect(() => {
+    if (currentPlan?.status === 'generating' && planId) {
+      return pollPlanStatus(planId, () => {
         fetchDag(planId)
         fetchTimeline(planId)
       })
-    }
-  }, [planId])
-
-  useEffect(() => {
-    if (currentPlan?.status === 'generating' && planId) {
-      const interval = setInterval(() => {
-        fetchPlan(planId)
-        fetchDag(planId)
-      }, 3000)
-      return () => clearInterval(interval)
     }
   }, [currentPlan?.status, planId])
 

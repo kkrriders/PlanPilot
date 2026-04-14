@@ -1,4 +1,6 @@
 .env
+celerybeat-schedule
+celerybeat.pid
 __pycache__/
 *.pyc
 *.pyo

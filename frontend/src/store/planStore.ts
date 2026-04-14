@@ -14,7 +14,7 @@ interface PlanState {
   fetchPlans: () => Promise<void>
   fetchPlan: (id: string) => Promise<void>
   fetchDag: (id: string) => Promise<void>
-  pollPlanStatus: (id: string, onReady: (plan: Plan) => void) => void
+  pollPlanStatus: (id: string, onReady: (plan: Plan) => void) => () => void
   setCurrentPlan: (plan: Plan | null) => void
 }
 
@@ -72,6 +72,7 @@ export const usePlanStore = create<PlanState>((set, get) => ({
         clearInterval(interval)
       }
     }, 2000)
+    return () => clearInterval(interval)
   },
 
   setCurrentPlan: (plan) => set({ currentPlan: plan }),

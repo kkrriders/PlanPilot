@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import uuid
 
 from src.core.database import get_db
 from src.core.dependencies import get_current_user
+from src.core.limiter import limiter
 from src.models.user import User
 from src.models.plan import Plan
 from src.models.drift import DriftMetric, DriftEvent
@@ -61,7 +62,9 @@ async def get_drift_events(
 
 
 @router.get("/replan/preview")
+@limiter.limit("10/minute")
 async def preview_replan(
+    request: Request,
     plan_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -75,11 +78,17 @@ async def preview_replan(
 
 
 @router.post("/replan")
+@limiter.limit("5/minute")
 async def apply_replan_endpoint(
+    request: Request,
     plan_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # NOTE: This generates a fresh replan preview and immediately applies it.
+    # The user approves a plan shown in the GET /preview, but a new LLM call
+    # is made here. In practice results are nearly identical; a future improvement
+    # would cache the preview and apply the exact reviewed version.
     await _check_plan_ownership(plan_id, current_user.id, db)
     preview = await generate_replan_preview(str(plan_id), db)
     version = await apply_replan(str(plan_id), preview, db)

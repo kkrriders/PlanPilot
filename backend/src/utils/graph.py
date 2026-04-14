@@ -2,6 +2,7 @@
 DAG utilities: Kahn's topological sort + CPM (Critical Path Method).
 No external graph library needed.
 """
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 import math
@@ -33,11 +34,11 @@ def topological_sort(nodes: list[str], edges: list[tuple[str, str]]) -> list[str
         adjacency[pred].append(succ)
         in_degree[succ] += 1
 
-    queue = [n for n in nodes if in_degree[n] == 0]
+    queue: deque[str] = deque(n for n in nodes if in_degree[n] == 0)
     result: list[str] = []
 
     while queue:
-        node = queue.pop(0)
+        node = queue.popleft()
         result.append(node)
         for neighbor in adjacency[node]:
             in_degree[neighbor] -= 1

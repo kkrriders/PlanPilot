@@ -3,7 +3,7 @@ Writes execution log entries and updates task state.
 """
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 import uuid
 
 from src.models.task import Task
@@ -66,17 +66,31 @@ async def get_timeline(plan_id: uuid.UUID, db: AsyncSession) -> list[dict]:
     tasks = result.scalars().all()
 
     now = datetime.now(timezone.utc)
+
+    # Single query: latest log per task (avoids N+1)
+    subq = (
+        select(
+            ExecutionLog.task_id,
+            func.max(ExecutionLog.logged_at).label("latest")
+        )
+        .where(ExecutionLog.plan_id == plan_id)
+        .group_by(ExecutionLog.task_id)
+        .subquery()
+    )
+    log_result = await db.execute(
+        select(ExecutionLog).join(
+            subq,
+            (ExecutionLog.task_id == subq.c.task_id) &
+            (ExecutionLog.logged_at == subq.c.latest)
+        )
+    )
+    latest_pct: dict[str, float] = {
+        str(log.task_id): log.pct_complete for log in log_result.scalars().all()
+    }
+
     entries = []
     for task in tasks:
-        # Get latest pct_complete
-        log_result = await db.execute(
-            select(ExecutionLog)
-            .where(ExecutionLog.task_id == task.id)
-            .order_by(ExecutionLog.logged_at.desc())
-            .limit(1)
-        )
-        latest_log = log_result.scalar_one_or_none()
-        pct = latest_log.pct_complete if latest_log else 0.0
+        pct = latest_pct.get(str(task.id), 0.0)
 
         is_delayed = (
             task.planned_end is not None

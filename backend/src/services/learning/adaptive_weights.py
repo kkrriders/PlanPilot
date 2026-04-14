@@ -2,7 +2,8 @@
 Adaptive learning: updates per-user estimation weights after plan completion.
 Requires minimum 3 completed plans before weights activate.
 """
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 
@@ -108,29 +109,19 @@ async def _update_weight(
     observed_value: float,
     db: AsyncSession,
 ) -> None:
-    result = await db.execute(
-        select(AdaptiveWeight).where(
-            and_(
-                AdaptiveWeight.scope == scope,
-                AdaptiveWeight.scope_id == scope_id,
-                AdaptiveWeight.key == key,
-            )
+    # Atomic UPSERT prevents race condition when two workers update the same user concurrently
+    t = AdaptiveWeight.__table__
+    stmt = (
+        pg_insert(AdaptiveWeight)
+        .values(scope=scope, scope_id=scope_id, key=key, value=observed_value, confidence=0.1, sample_count=1)
+        .on_conflict_do_update(
+            constraint="uq_weight",
+            set_={
+                "value": (1 - EMA_ALPHA) * t.c.value + EMA_ALPHA * observed_value,
+                "sample_count": t.c.sample_count + 1,
+                "confidence": func.least(0.95, (t.c.sample_count + 1.0) / 10.0),
+                "updated_at": func.now(),
+            },
         )
     )
-    weight = result.scalar_one_or_none()
-
-    if weight:
-        # Exponential moving average
-        weight.value = (1 - EMA_ALPHA) * weight.value + EMA_ALPHA * observed_value
-        weight.sample_count += 1
-        weight.confidence = min(0.95, weight.sample_count / 10)
-    else:
-        weight = AdaptiveWeight(
-            scope=scope,
-            scope_id=scope_id,
-            key=key,
-            value=observed_value,
-            confidence=0.1,
-            sample_count=1,
-        )
-        db.add(weight)
+    await db.execute(stmt)

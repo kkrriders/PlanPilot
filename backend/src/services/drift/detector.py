@@ -56,7 +56,8 @@ async def compute_drift(plan_id: str, db: AsyncSession) -> DriftMetric:
     overdue_slippage = sum(t.estimated_hours or 0 for t in overdue)
     slippage_hours += overdue_slippage
 
-    schedule_drift_pct = slippage_hours / total_planned_hours
+    # Clamp to zero: early completions should not offset overdue penalties
+    schedule_drift_pct = max(0.0, slippage_hours / total_planned_hours)
 
     # --- Effort drift ---
     # Measures whether completed tasks took more/less effort than estimated.

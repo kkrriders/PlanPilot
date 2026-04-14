@@ -4,20 +4,25 @@ const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
 })
 
-// Attach access token to every request
+let isRefreshing = false
+
+// Attach access token to every request (SSR-safe)
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('access_token')
+    if (token) config.headers.Authorization = `Bearer ${token}`
+  }
   return config
 })
 
-// Auto-refresh on 401
+// Auto-refresh on 401 (SSR-safe, re-entrancy guarded)
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
-    if (error.response?.status === 401) {
+    if (typeof window !== 'undefined' && error.response?.status === 401 && !isRefreshing) {
       const refresh = localStorage.getItem('refresh_token')
       if (refresh) {
+        isRefreshing = true
         try {
           const { data } = await axios.post(
             `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/auth/refresh`,
@@ -30,6 +35,8 @@ api.interceptors.response.use(
         } catch {
           localStorage.clear()
           window.location.href = '/login'
+        } finally {
+          isRefreshing = false
         }
       }
     }

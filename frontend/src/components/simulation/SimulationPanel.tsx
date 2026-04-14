@@ -35,6 +35,7 @@ export default function SimulationPanel({ planId, onClose, onStepComplete }: Pro
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
   const autoRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const runStepRef = useRef<() => Promise<void>>(async () => {})
   const logEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -49,6 +50,11 @@ export default function SimulationPanel({ planId, onClose, onStepComplete }: Pro
       setRunning(false)
     }
   }, [done])
+
+  // Keep ref in sync so setInterval always calls the latest version of runStep
+  useEffect(() => {
+    runStepRef.current = runStep
+  })
 
   const runStep = async () => {
     if (stepping || done) return
@@ -82,7 +88,7 @@ export default function SimulationPanel({ planId, onClose, onStepComplete }: Pro
       setRunning(false)
     } else {
       setRunning(true)
-      autoRef.current = setInterval(runStep, 1800)
+      autoRef.current = setInterval(() => runStepRef.current(), 1800)
     }
   }
 

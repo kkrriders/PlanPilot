@@ -94,7 +94,7 @@ async def generate_plan(plan_id: str, db: AsyncSession) -> None:
             planned_end=st.planned_end,
             is_on_critical_path=st.is_on_critical_path,
             metadata_={
-                "risk_factors": risk_factors if (st.id == critical_path_ids[0] if critical_path_ids else False) else [],
+                "risk_factors": risk_factors if st.is_on_critical_path else [],
             },
         )
         db.add(task)

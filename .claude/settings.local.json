@@ -9,7 +9,10 @@
       "Bash(python -c \"from src.main import app; print\\('Backend OK'\\)\")",
       "Bash(python -c ':*)",
       "Bash(python:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(git -C /c/Users/karti/PlanPilot ls-files --others --exclude-standard)",
+      "Bash(git:*)",
+      "Bash(xargs cat:*)"
     ]
   }
 }

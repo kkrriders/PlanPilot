@@ -6,7 +6,11 @@ from src.services.execution.progress_monitor import scan_for_delays
 
 @celery_app.task(name="src.workers.execution_tasks.scan_delays", queue="monitoring")
 def scan_delays():
-    asyncio.run(_run())
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_run())
+    finally:
+        loop.close()
 
 
 async def _run():

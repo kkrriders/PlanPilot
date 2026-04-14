@@ -73,7 +73,10 @@ async def run_compliance_checks(
         if deps:
             pred_ids = [d.predecessor_id for d in deps]
             pred_result = await db.execute(
-                select(Task).where(Task.id.in_(pred_ids), Task.status == "pending")
+                select(Task).where(
+                    Task.id.in_(pred_ids),
+                    Task.status.not_in(["completed", "skipped", "failed"]),
+                )
             )
             blocked_by = pred_result.scalars().all()
             if blocked_by:
@@ -81,7 +84,7 @@ async def run_compliance_checks(
                 violations.append(ComplianceViolation(
                     code="DEPENDENCY_GATE",
                     severity="error",
-                    message=f"Cannot proceed — predecessor tasks still pending: {names}",
+                    message=f"Cannot proceed — predecessor tasks not yet completed: {names}",
                 ))
 
     # ── 3. NO_SKIP_GATE ─────────────────────────────────────────────────────

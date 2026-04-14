@@ -27,8 +27,10 @@ async def get_summary(
     completed = [p for p in plans if p.status == "completed"]
     active = [p for p in plans if p.status == "active"]
 
-    avg_risk = sum(p.risk_score for p in plans if p.risk_score) / len(plans) if plans else 0
-    avg_confidence = sum(p.confidence for p in plans if p.confidence) / len(plans) if plans else 0
+    scored_risk = [p for p in plans if p.risk_score is not None]
+    scored_conf = [p for p in plans if p.confidence is not None]
+    avg_risk = sum(p.risk_score for p in scored_risk) / len(scored_risk) if scored_risk else 0
+    avg_confidence = sum(p.confidence for p in scored_conf) / len(scored_conf) if scored_conf else 0
 
     return {
         "total_plans": len(plans),
@@ -68,7 +70,8 @@ async def get_plan_accuracy(
         for t in tasks
     ]
 
-    avg_accuracy = sum(d["accuracy_ratio"] for d in data if d["accuracy_ratio"]) / len(data) if data else 1.0
+    scored = [d for d in data if d["accuracy_ratio"] is not None]
+    avg_accuracy = sum(d["accuracy_ratio"] for d in scored) / len(scored) if scored else 1.0
 
     return {"tasks": data, "avg_accuracy_ratio": round(avg_accuracy, 3)}
 

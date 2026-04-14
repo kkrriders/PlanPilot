@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -6,12 +6,14 @@ from src.core.database import get_db
 from src.core.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_token
 from src.models.user import User
 from src.schemas.user import UserRegister, UserLogin, UserOut, TokenOut, RefreshIn
+from src.core.limiter import limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=UserOut, status_code=201)
-async def register(body: UserRegister, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def register(request: Request, body: UserRegister, db: AsyncSession = Depends(get_db)):
     existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -28,7 +30,8 @@ async def register(body: UserRegister, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenOut)
-async def login(body: UserLogin, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def login(request: Request, body: UserLogin, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
     if not user or not verify_password(body.password, user.hashed_pw):
@@ -41,7 +44,8 @@ async def login(body: UserLogin, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/refresh", response_model=TokenOut)
-async def refresh(body: RefreshIn, db: AsyncSession = Depends(get_db)):
+@limiter.limit("20/minute")
+async def refresh(request: Request, body: RefreshIn, db: AsyncSession = Depends(get_db)):
     payload = decode_token(body.refresh_token)
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid refresh token")
