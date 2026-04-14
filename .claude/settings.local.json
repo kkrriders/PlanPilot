@@ -12,7 +12,10 @@
       "Bash(grep:*)",
       "Bash(git -C /c/Users/karti/PlanPilot ls-files --others --exclude-standard)",
       "Bash(git:*)",
-      "Bash(xargs cat:*)"
+      "Bash(xargs cat:*)",
+      "Bash(docker compose ps:*)",
+      "Bash(docker compose logs:*)",
+      "Bash(docker compose up:*)"
     ]
   }
 }
