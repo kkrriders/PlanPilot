@@ -32,7 +32,9 @@
       "Bash(npm run *)",
       "Bash(wmic logicaldisk *)",
       "Bash(node -e \"const p=require\\('./node_modules/lucide-react/package.json'\\); console.log\\(p.version\\)\")",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(ls C:/Users/karti/PlanPilot/*.md)"
     ]
   }
 }

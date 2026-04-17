@@ -1,16 +1,16 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { Save, CheckCircle, User } from 'lucide-react'
+import { Save, User } from 'lucide-react'
 import api from '@/services/api'
 import AuthGuard from '@/components/shared/AuthGuard'
+import { useToastStore } from '@/store/toastStore'
 
 function SettingsContent() {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [error, setError] = useState('')
+  const { toast } = useToastStore()
 
   useEffect(() => {
     api.get('/api/v1/users/me')
@@ -18,20 +18,17 @@ function SettingsContent() {
         setFullName(r.data.full_name || '')
         setEmail(r.data.email || '')
       })
-      .catch(() => setError('Failed to load profile'))
+      .catch(() => toast('Failed to load profile', 'error'))
       .finally(() => setLoading(false))
   }, [])
 
   const save = async () => {
     setSaving(true)
-    setError('')
-    setSaved(false)
     try {
       await api.patch('/api/v1/users/me', { full_name: fullName.trim() || null })
-      setSaved(true)
-      setTimeout(() => setSaved(false), 3000)
+      toast('Profile saved', 'success')
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Failed to save changes')
+      toast(e?.response?.data?.detail || 'Failed to save changes', 'error')
     } finally {
       setSaving(false)
     }
@@ -87,19 +84,13 @@ function SettingsContent() {
           />
         </div>
 
-        {error && (
-          <p className="text-sm text-red-400 bg-red-950/30 border border-red-800 rounded-lg px-3 py-2">
-            {error}
-          </p>
-        )}
-
         <button
           onClick={save}
           disabled={saving}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
         >
-          {saved ? <CheckCircle size={14} className="text-green-300" /> : <Save size={14} />}
-          {saving ? 'Saving...' : saved ? 'Saved!' : 'Save Changes'}
+          <Save size={14} />
+          {saving ? 'Saving...' : 'Save Changes'}
         </button>
       </div>
     </div>

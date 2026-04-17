@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { X, Play, CheckCircle, AlertCircle, Ban, MessageSquare, Link, ShieldAlert, ShieldCheck, Clock } from 'lucide-react'
 import { executionService } from '../../services/executionService'
+import { useToastStore } from '../../store/toastStore'
 
 interface Props {
   planId: string
@@ -36,6 +37,7 @@ export default function TaskUpdateModal({ planId, task, onClose, onUpdated }: Pr
   const [actualHours, setActualHours] = useState('')
   const [loading, setLoading] = useState(false)
   const [serverErrors, setServerErrors] = useState<{ code: string; message: string }[]>([])
+  const { toast } = useToastStore()
 
   const selected = EVENT_OPTIONS.find(e => e.value === eventType)!
   const isCompletion = eventType === 'completed'
@@ -60,14 +62,18 @@ export default function TaskUpdateModal({ planId, task, onClose, onUpdated }: Pr
         evidence_url: evidenceUrl.trim() || undefined,
         actual_hours: actualHours ? parseFloat(actualHours) : undefined,
       })
+      toast(`Task "${task.label}" updated`, 'success')
       onUpdated()
       onClose()
     } catch (e: any) {
       const detail = e?.response?.data?.detail
       if (detail?.compliance_errors) {
         setServerErrors(detail.compliance_errors)
+        toast('Compliance check failed — see errors below', 'error')
       } else {
-        setServerErrors([{ code: 'SERVER_ERROR', message: detail || 'Failed to log event' }])
+        const msg = detail || 'Failed to log event'
+        setServerErrors([{ code: 'SERVER_ERROR', message: msg }])
+        toast(msg, 'error')
       }
     } finally {
       setLoading(false)

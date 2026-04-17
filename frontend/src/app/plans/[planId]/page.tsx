@@ -15,8 +15,9 @@ import ReplanningModal from '@/components/execution/ReplanningModal'
 import DriftAnalyticsTab from '@/components/execution/DriftAnalyticsTab'
 import { executionService } from '@/services/executionService'
 import { planService, type VersionHistory } from '@/services/planService'
-import { Activity, LayoutDashboard, BarChart3, RefreshCw, Users, RotateCcw, AlertCircle, Settings, Bot, History, GitFork, ChevronDown, ChevronRight, TriangleAlert } from 'lucide-react'
+import { Activity, LayoutDashboard, BarChart3, RefreshCw, Users, RotateCcw, AlertCircle, Settings, Bot, History, GitFork, ChevronDown, ChevronRight, TriangleAlert, Download } from 'lucide-react'
 import AuthGuard from '@/components/shared/AuthGuard'
+import { useToastStore } from '@/store/toastStore'
 
 type Tab = 'board' | 'dag' | 'timeline' | 'drift' | 'team' | 'history'
 
@@ -42,6 +43,34 @@ function PlanDetailContent() {
   const [history, setHistory] = useState<VersionHistory[]>([])
   const [bottlenecks, setBottlenecks] = useState<BottleneckItem[]>([])
   const [showBottlenecks, setShowBottlenecks] = useState(true)
+  const { toast } = useToastStore()
+
+  const handleExportCsv = () => {
+    if (!currentDag || !currentPlan) return
+    const headers = ['Task', 'Category', 'Status', 'Est. Hours', 'Priority', 'Assigned To', 'Critical Path']
+    const rows = currentDag.nodes.map(n => [
+      n.data.label,
+      n.data.category ?? '',
+      n.data.status,
+      n.data.estimated_hours ?? '',
+      n.data.priority,
+      n.data.assigned_to ?? '',
+      n.data.is_on_critical_path ? 'Yes' : 'No',
+    ])
+    const csv = [headers, ...rows]
+      .map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${currentPlan.title.replace(/[^a-z0-9]/gi, '_')}_tasks.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    toast('Tasks exported as CSV', 'success')
+  }
 
   const handleRetryGenerate = async () => {
     if (!planId) return
@@ -102,6 +131,9 @@ function PlanDetailContent() {
       await fetchPlan(planId)
       await fetchDag(planId)
       await fetchTimeline(planId)
+      toast('Replan applied — tasks have been updated', 'success')
+    } catch {
+      toast('Failed to apply replan', 'error')
     } finally {
       setApplyingReplan(false)
     }
@@ -144,6 +176,15 @@ function PlanDetailContent() {
                 <Bot size={12} />
                 Simulate
               </button>
+              {currentDag && (
+                <button
+                  onClick={handleExportCsv}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 hover:text-white rounded-lg transition-colors"
+                >
+                  <Download size={12} />
+                  Export CSV
+                </button>
+              )}
               <button
                 onClick={() => setShowRegenerate(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 hover:text-white rounded-lg transition-colors"
