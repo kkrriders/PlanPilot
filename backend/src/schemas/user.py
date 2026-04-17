@@ -10,9 +10,18 @@ class UserRegister(BaseModel):
 
     @field_validator("password")
     @classmethod
-    def password_min_length(cls, v: str) -> str:
+    def password_strength(cls, v: str) -> str:
+        errors = []
         if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
+            errors.append("at least 8 characters")
+        if not any(c.isupper() for c in v):
+            errors.append("one uppercase letter")
+        if not any(c.isdigit() for c in v):
+            errors.append("one number")
+        if not any(c in "!@#$%^&*()_+-=[]{}|;':\",./<>?" for c in v):
+            errors.append("one special character (!@#$%^&* etc.)")
+        if errors:
+            raise ValueError("Password must contain " + ", ".join(errors))
         return v
 
 

@@ -13,6 +13,7 @@ class LogEventCreate(BaseModel):
     note: str | None = None
     new_status: TaskStatus | None = None
     evidence_url: str | None = None
+    actual_hours: float | None = Field(None, ge=0, description="Actual hours spent; overrides auto-computed value")
 
 
 class ExecutionLogOut(BaseModel):

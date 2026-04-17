@@ -15,12 +15,20 @@ from src.models.team import TeamMember
 from src.services.drift.detector import compute_drift
 
 
+# Scenario definitions
+SCENARIOS = {
+    "optimistic":    {"speed_mult": 0.80, "block_chance": 0.02, "dropout_day": None},
+    "realistic":     {"speed_mult": 1.00, "block_chance": 0.10, "dropout_day": None},
+    "pessimistic":   {"speed_mult": 1.45, "block_chance": 0.25, "dropout_day": None},
+    "key_person_leaves": {"speed_mult": 1.10, "block_chance": 0.12, "dropout_day": 5},
+}
+
 # Bot personalities — speed_factor > 1.0 means they run over estimate
 DEFAULT_BOTS = [
-    {"name": "Alex Chen",    "speed": 0.85, "role": "Frontend",  "emoji": "🟦"},
-    {"name": "Jordan Lee",   "speed": 1.45, "role": "Backend",   "emoji": "🟧"},  # drift-maker
-    {"name": "Sam Rivera",   "speed": 1.00, "role": "Full-stack","emoji": "🟩"},
-    {"name": "Maya Patel",   "speed": 1.30, "role": "DevOps",    "emoji": "🟥"},
+    {"name": "Alex Chen",    "speed": 0.85, "role": "Frontend",   "emoji": "🟦"},
+    {"name": "Jordan Lee",   "speed": 1.45, "role": "Backend",    "emoji": "🟧"},  # drift-maker
+    {"name": "Sam Rivera",   "speed": 1.00, "role": "Full-stack", "emoji": "🟩"},
+    {"name": "Maya Patel",   "speed": 1.30, "role": "DevOps",     "emoji": "🟥"},
 ]
 
 NOTES_STARTED = {
@@ -95,21 +103,15 @@ def _pick_note(notes_map: dict, category: str | None) -> str:
 
 def _pick_evidence() -> str:
     template = random.choice(EVIDENCE_URLS)
-    return template.format(
-        n=random.randint(10, 999),
-        h=uuid.uuid4().hex[:7],
-    )
+    return template.format(n=random.randint(10, 999), h=uuid.uuid4().hex[:7])
 
 
 def _compute_actual_hours(estimated: float, speed: float) -> float:
-    """Add realistic noise on top of the bot's base speed factor."""
     noise = random.uniform(0.85, 1.20)
-    actual = estimated * speed * noise
-    return round(max(0.5, actual), 1)
+    return round(max(0.5, estimated * speed * noise), 1)
 
 
 def _bot_for_task(task: Task, bots: list[dict]) -> dict:
-    """Pick a bot — prefer matching by assigned_to name, else random."""
     if task.assigned_to:
         for b in bots:
             if b["name"].lower() == task.assigned_to.lower():
@@ -117,28 +119,38 @@ def _bot_for_task(task: Task, bots: list[dict]) -> dict:
     return random.choice(bots)
 
 
-async def simulate_step(plan_id: str, db: AsyncSession) -> dict:
+def _apply_scenario(bots: list[dict], scenario: str, current_day: int) -> tuple[list[dict], float, float]:
+    """Return (active_bots, speed_multiplier, block_chance) for the current day."""
+    cfg = SCENARIOS.get(scenario, SCENARIOS["realistic"])
+    active_bots = list(bots)
+
+    # Key person leaves: drop the slowest bot after dropout_day
+    if cfg["dropout_day"] and current_day >= cfg["dropout_day"] and len(active_bots) > 1:
+        active_bots = sorted(active_bots, key=lambda b: b["speed"])[:-1]
+
+    return active_bots, cfg["speed_mult"], cfg["block_chance"]
+
+
+async def simulate_step(plan_id: str, db: AsyncSession, scenario: str = "realistic", current_day: int = 1) -> dict:
     """
     Advance simulation by one compressed 'day'.
     Returns events list + current state.
     """
     plan_uuid = uuid.UUID(plan_id)
 
-    # Load plan
     plan_res = await db.execute(select(Plan).where(Plan.id == plan_uuid))
     plan = plan_res.scalar_one_or_none()
     if not plan:
         raise ValueError("Plan not found")
 
-    # Load tasks
-    task_res = await db.execute(select(Task).where(Task.plan_id == plan_uuid))
+    task_res = await db.execute(
+        select(Task).where(Task.plan_id == plan_uuid, Task.version == plan.current_version)
+    )
     tasks: list[Task] = list(task_res.scalars().all())
 
-    # Load dependencies
     dep_res = await db.execute(select(TaskDependency).where(TaskDependency.plan_id == plan_uuid))
     deps = dep_res.scalars().all()
 
-    # Build predecessor map: task_id -> set of predecessor_ids
     pred_map: dict[uuid.UUID, set[uuid.UUID]] = {}
     for d in deps:
         pred_map.setdefault(d.successor_id, set()).add(d.predecessor_id)
@@ -147,43 +159,49 @@ async def simulate_step(plan_id: str, db: AsyncSession) -> dict:
     in_progress = [t for t in tasks if t.status == "in_progress"]
     pending = [t for t in tasks if t.status == "pending"]
 
-    # Load team members as bots (fall back to defaults)
+    # Load team members as bots
     member_res = await db.execute(select(TeamMember).where(TeamMember.plan_id == plan_uuid))
     members = member_res.scalars().all()
-    bots = (
+    base_bots = (
         [{"name": m.name, "speed": _speed_for_member(i), "role": m.role, "emoji": _emoji_for(i)}
          for i, m in enumerate(members)]
         if members else DEFAULT_BOTS
     )
+
+    active_bots, speed_mult, block_chance = _apply_scenario(base_bots, scenario, current_day)
+
+    # Critical path task IDs for this version
+    critical_ids = {t.id for t in tasks if t.is_on_critical_path}
 
     now = datetime.now(timezone.utc)
     events = []
 
     # --- Phase 1: Complete / block in-progress tasks ---
     for task in in_progress:
-        bot = _bot_for_task(task, bots)
+        bot = _bot_for_task(task, active_bots)
 
-        # 10% chance of getting blocked
-        if random.random() < 0.10:
+        if random.random() < block_chance:
             task.status = "blocked"
             note = random.choice(NOTES_BLOCKED)
-            log = ExecutionLog(
+            db.add(ExecutionLog(
                 task_id=task.id, plan_id=plan_uuid,
                 event_type="blocked", prev_status="in_progress", new_status="blocked",
                 pct_complete=random.randint(30, 70),
                 note=note, logged_by=plan.user_id,
-            )
-            db.add(log)
+            ))
             events.append({
-                "type": "blocked", "task": task.name,
-                "bot": bot["name"], "emoji": bot["emoji"],
+                "type": "blocked",
+                "task": task.name,
+                "task_id": str(task.id),
+                "bot": bot["name"],
+                "emoji": bot["emoji"],
                 "note": note,
+                "is_on_critical_path": task.id in critical_ids,
             })
             continue
 
-        # Complete the task
         estimated = task.estimated_hours or 8.0
-        actual = _compute_actual_hours(estimated, bot["speed"])
+        actual = _compute_actual_hours(estimated, bot["speed"] * speed_mult)
         task.status = "completed"
         task.actual_hours = actual
         task.actual_end = now
@@ -192,25 +210,25 @@ async def simulate_step(plan_id: str, db: AsyncSession) -> dict:
 
         note = _pick_note(NOTES_COMPLETED, task.category)
         evidence = _pick_evidence()
-        log = ExecutionLog(
+        db.add(ExecutionLog(
             task_id=task.id, plan_id=plan_uuid,
             event_type="completed", prev_status="in_progress", new_status="completed",
             pct_complete=100, note=note, evidence_url=evidence,
             logged_by=plan.user_id,
-        )
-        db.add(log)
+        ))
         completed_ids.add(task.id)
 
-        over_under = actual - estimated
         events.append({
             "type": "completed",
             "task": task.name,
+            "task_id": str(task.id),
             "bot": bot["name"],
             "emoji": bot["emoji"],
             "estimated_hours": estimated,
             "actual_hours": actual,
-            "over_under": round(over_under, 1),
+            "over_under": round(actual - estimated, 1),
             "note": note,
+            "is_on_critical_path": task.id in critical_ids,
         })
 
     # --- Phase 2: Start 1-3 ready pending tasks ---
@@ -222,23 +240,24 @@ async def simulate_step(plan_id: str, db: AsyncSession) -> dict:
     to_start = ready[:random.randint(1, min(3, max(1, len(ready))))]
 
     for task in to_start:
-        bot = _bot_for_task(task, bots)
+        bot = _bot_for_task(task, active_bots)
         task.status = "in_progress"
         task.actual_start = now
 
         note = _pick_note(NOTES_STARTED, task.category)
-        log = ExecutionLog(
+        db.add(ExecutionLog(
             task_id=task.id, plan_id=plan_uuid,
             event_type="started", prev_status="pending", new_status="in_progress",
             pct_complete=0, note=note, logged_by=plan.user_id,
-        )
-        db.add(log)
+        ))
         events.append({
             "type": "started",
             "task": task.name,
+            "task_id": str(task.id),
             "bot": bot["name"],
             "emoji": bot["emoji"],
             "note": note,
+            "is_on_critical_path": task.id in critical_ids,
         })
 
     await db.flush()
@@ -258,16 +277,28 @@ async def simulate_step(plan_id: str, db: AsyncSession) -> dict:
 
     await db.commit()
 
-    # Compute progress stats
-    all_tasks_fresh: list[Task] = list((await db.execute(
-        select(Task).where(Task.plan_id == plan_uuid)
+    # Fresh stats
+    all_tasks = list((await db.execute(
+        select(Task).where(Task.plan_id == plan_uuid, Task.version == plan.current_version)
     )).scalars().all())
 
-    total = len(all_tasks_fresh)
-    done = sum(1 for t in all_tasks_fresh if t.status == "completed")
-    in_prog = sum(1 for t in all_tasks_fresh if t.status == "in_progress")
-    blocked_count = sum(1 for t in all_tasks_fresh if t.status == "blocked")
-    all_done = done + blocked_count >= total or done >= total
+    total = len(all_tasks)
+    done = sum(1 for t in all_tasks if t.status == "completed")
+    in_prog = sum(1 for t in all_tasks if t.status == "in_progress")
+    blocked_count = sum(1 for t in all_tasks if t.status == "blocked")
+    all_done = done >= total
+
+    # Projected completion: avg tasks/day × remaining
+    remaining = total - done
+    tasks_this_day = sum(1 for e in events if e["type"] == "completed")
+    avg_per_day = max(tasks_this_day, 1)
+    projected_days_remaining = round(remaining / avg_per_day) if remaining > 0 else 0
+
+    # Scenario info for frontend display
+    scenario_cfg = SCENARIOS.get(scenario, SCENARIOS["realistic"])
+    dropped_bot = None
+    if scenario_cfg["dropout_day"] and current_day >= scenario_cfg["dropout_day"] and len(base_bots) > 1:
+        dropped_bot = sorted(base_bots, key=lambda b: b["speed"])[-1]["name"]
 
     return {
         "events": events,
@@ -278,30 +309,28 @@ async def simulate_step(plan_id: str, db: AsyncSession) -> dict:
         "progress_pct": round(done / total * 100) if total else 0,
         "drift": drift_info,
         "simulation_complete": all_done,
+        "projected_days_remaining": projected_days_remaining,
+        "scenario": scenario,
+        "dropped_bot": dropped_bot,
     }
 
 
 async def reset_simulation(plan_id: str, db: AsyncSession) -> dict:
-    """Reset all tasks to pending, clear execution logs."""
     plan_uuid = uuid.UUID(plan_id)
-
-    # Delete execution logs
     await db.execute(delete(ExecutionLog).where(ExecutionLog.plan_id == plan_uuid))
-
-    # Reset task state
-    task_res = await db.execute(select(Task).where(Task.plan_id == plan_uuid))
+    task_res = await db.execute(
+        select(Task).where(Task.plan_id == plan_uuid)
+    )
     for task in task_res.scalars().all():
         task.status = "pending"
         task.actual_start = None
         task.actual_end = None
         task.actual_hours = None
-
     await db.commit()
     return {"reset": True}
 
 
 def _speed_for_member(index: int) -> float:
-    """Give each team member a deterministic speed based on their position."""
     speeds = [0.90, 1.40, 1.05, 1.25, 0.95, 1.15, 1.00, 1.35]
     return speeds[index % len(speeds)]
 

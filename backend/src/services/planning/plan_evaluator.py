@@ -2,7 +2,7 @@
 Combines LLM risk score with structural metrics for final risk/confidence.
 """
 import json
-from src.services.llm.groq_provider import sonnet
+from src.services.llm.groq_provider import haiku as sonnet  # risk eval: fast model is sufficient
 from src.services.llm.prompt_templates import RISK_SYSTEM, RISK_USER
 
 

@@ -71,6 +71,7 @@ async def log_task_event(
         compliance_flags=[w.to_dict() for w in warnings],
         user_id=current_user.id,
         db=db,
+        actual_hours=body.actual_hours,
     )
     await db.commit()
     return log

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import uuid
@@ -8,9 +9,14 @@ from src.core.dependencies import get_current_user
 from src.core.limiter import limiter
 from src.models.user import User
 from src.models.plan import Plan
-from src.services.simulation.simulator import simulate_step, reset_simulation
+from src.services.simulation.simulator import simulate_step, reset_simulation, SCENARIOS
 
 router = APIRouter(prefix="/plans/{plan_id}/simulate", tags=["simulation"])
+
+
+class StepRequest(BaseModel):
+    scenario: str = "realistic"
+    current_day: int = 1
 
 
 async def _check_plan(plan_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession) -> Plan:
@@ -23,16 +29,29 @@ async def _check_plan(plan_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession) 
     return plan
 
 
+@router.get("/scenarios")
+async def list_scenarios():
+    """Return available scenario names and their descriptions."""
+    return {
+        "optimistic":        {"label": "Optimistic",       "description": "All engineers run ahead of schedule, rare blocks"},
+        "realistic":         {"label": "Realistic",        "description": "Mixed speeds, occasional blockers (default)"},
+        "pessimistic":       {"label": "Pessimistic",      "description": "Most tasks run over estimate, frequent blocks"},
+        "key_person_leaves": {"label": "Key Person Leaves","description": "A team member drops out at day 5 — their tasks stall"},
+    }
+
+
 @router.post("/step")
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 async def step(
     request: Request,
     plan_id: uuid.UUID,
+    body: StepRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await _check_plan(plan_id, current_user.id, db)
-    return await simulate_step(str(plan_id), db)
+    scenario = body.scenario if body.scenario in SCENARIOS else "realistic"
+    return await simulate_step(str(plan_id), db, scenario=scenario, current_day=body.current_day)
 
 
 @router.post("/reset")

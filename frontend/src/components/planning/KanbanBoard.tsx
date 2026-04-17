@@ -280,10 +280,10 @@ function TaskCard({ node, onClick }: { node: any; onClick: () => void }) {
             </div>
           )}
           {status === 'completed' && (
-            <ShieldCheck size={12} className="text-green-400" title="Completed with evidence" />
+            <ShieldCheck size={12} className="text-green-400" aria-label="Completed with evidence" />
           )}
           {status === 'blocked' && (
-            <ShieldAlert size={12} className="text-yellow-400" title="Task is blocked" />
+            <ShieldAlert size={12} className="text-yellow-400" aria-label="Task is blocked" />
           )}
           <span className="text-[10px] text-gray-600 group-hover:text-gray-400 transition-colors">
             Update →

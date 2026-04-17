@@ -10,6 +10,7 @@ from src.models.plan import Plan, PlanVersion
 from src.models.task import Task, TaskDependency
 from src.schemas.plan import PlanCreate, PlanUpdate, PlanOut, PlanVersionOut, DagOut
 from src.workers.planning_tasks import generate_plan_async
+from src.workers.celery_app import celery_app
 from src.core.limiter import limiter
 
 router = APIRouter(prefix="/plans", tags=["plans"])
@@ -43,7 +44,9 @@ async def create_plan(
 
 
 @router.post("/{plan_id}/generate", response_model=PlanOut)
+@limiter.limit("10/minute")
 async def trigger_generate(
+    request: Request,
     plan_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -57,8 +60,9 @@ async def trigger_generate(
     plan = result.scalar_one_or_none()
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
-    if plan.status == "generating":
-        raise HTTPException(status_code=409, detail="Plan is already generating")
+    # If a generation is in flight, revoke it before starting a new one
+    if plan.status == "generating" and plan.job_id:
+        celery_app.control.revoke(plan.job_id, terminate=True)
     job = generate_plan_async.delay(str(plan.id))
     plan.status = "generating"
     plan.job_id = job.id
@@ -69,11 +73,18 @@ async def trigger_generate(
 
 @router.get("", response_model=list[PlanOut])
 async def list_plans(
+    limit: int = 20,
+    offset: int = 0,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    limit = min(limit, 100)  # cap at 100
     result = await db.execute(
-        select(Plan).where(Plan.user_id == current_user.id).order_by(Plan.created_at.desc())
+        select(Plan)
+        .where(Plan.user_id == current_user.id)
+        .order_by(Plan.created_at.desc())
+        .limit(limit)
+        .offset(offset)
     )
     return result.scalars().all()
 
@@ -149,6 +160,41 @@ async def list_versions(
     return result.scalars().all()
 
 
+@router.get("/{plan_id}/history")
+async def get_task_history(
+    plan_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns all tasks from previous versions grouped by version number."""
+    plan = await _get_plan_or_404(plan_id, current_user.id, db)
+    if plan.current_version <= 1:
+        return []
+
+    task_result = await db.execute(
+        select(Task)
+        .where(Task.plan_id == plan_id, Task.version < plan.current_version)
+        .order_by(Task.version.desc(), Task.planned_start)
+    )
+    tasks = task_result.scalars().all()
+
+    grouped: dict[int, list] = {}
+    for t in tasks:
+        grouped.setdefault(t.version, []).append({
+            "id": str(t.id),
+            "name": t.name,
+            "category": t.category,
+            "status": t.status,
+            "estimated_hours": t.estimated_hours,
+            "actual_hours": t.actual_hours,
+            "assigned_to": t.assigned_to,
+            "is_on_critical_path": t.is_on_critical_path,
+            "version": t.version,
+        })
+
+    return [{"version": v, "tasks": grouped[v]} for v in sorted(grouped.keys(), reverse=True)]
+
+
 @router.get("/{plan_id}/dag", response_model=DagOut)
 async def get_dag(
     plan_id: uuid.UUID,
@@ -157,7 +203,9 @@ async def get_dag(
 ):
     plan = await _get_plan_or_404(plan_id, current_user.id, db)
 
-    task_result = await db.execute(select(Task).where(Task.plan_id == plan_id))
+    task_result = await db.execute(
+        select(Task).where(Task.plan_id == plan_id, Task.version == plan.current_version)
+    )
     tasks = task_result.scalars().all()
 
     dep_result = await db.execute(select(TaskDependency).where(TaskDependency.plan_id == plan_id))

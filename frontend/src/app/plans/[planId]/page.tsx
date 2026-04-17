@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import { usePlanStore } from '@/store/planStore'
 import { useExecutionStore } from '@/store/executionStore'
 import KanbanBoard from '@/components/planning/KanbanBoard'
+import DagVisualization from '@/components/planning/DagVisualization'
 import TeamTab from '@/components/planning/TeamTab'
 import RegenerateModal from '@/components/planning/RegenerateModal'
 import SimulationPanel from '@/components/simulation/SimulationPanel'
@@ -13,11 +14,20 @@ import DriftAlertBanner from '@/components/execution/DriftAlertBanner'
 import ReplanningModal from '@/components/execution/ReplanningModal'
 import DriftAnalyticsTab from '@/components/execution/DriftAnalyticsTab'
 import { executionService } from '@/services/executionService'
-import { planService } from '@/services/planService'
-import { Activity, LayoutDashboard, BarChart3, RefreshCw, Users, RotateCcw, AlertCircle, Settings, Bot } from 'lucide-react'
+import { planService, type VersionHistory } from '@/services/planService'
+import { Activity, LayoutDashboard, BarChart3, RefreshCw, Users, RotateCcw, AlertCircle, Settings, Bot, History, GitFork, ChevronDown, ChevronRight, TriangleAlert } from 'lucide-react'
 import AuthGuard from '@/components/shared/AuthGuard'
 
-type Tab = 'board' | 'timeline' | 'drift' | 'team'
+type Tab = 'board' | 'dag' | 'timeline' | 'drift' | 'team' | 'history'
+
+interface BottleneckItem {
+  task_id: string
+  name: string
+  status: string
+  successor_count: number
+  is_delayed: boolean
+  is_on_critical_path: boolean
+}
 
 function PlanDetailContent() {
   const params = useParams<{ planId: string }>()
@@ -29,6 +39,9 @@ function PlanDetailContent() {
   const [retrying, setRetrying] = useState(false)
   const [showRegenerate, setShowRegenerate] = useState(false)
   const [showSimulation, setShowSimulation] = useState(false)
+  const [history, setHistory] = useState<VersionHistory[]>([])
+  const [bottlenecks, setBottlenecks] = useState<BottleneckItem[]>([])
+  const [showBottlenecks, setShowBottlenecks] = useState(true)
 
   const handleRetryGenerate = async () => {
     if (!planId) return
@@ -51,6 +64,8 @@ function PlanDetailContent() {
     fetchDag(planId)
     fetchTimeline(planId)
     fetchDrift(planId)
+    planService.getHistory(planId).then(setHistory).catch(() => {})
+    executionService.getBottlenecks(planId).then(setBottlenecks).catch(() => {})
   }, [planId])
 
   // Single polling mechanism — returns cleanup to stop on unmount or status change
@@ -198,9 +213,11 @@ function PlanDetailContent() {
       <div className="flex gap-1 bg-gray-900 border border-gray-700 rounded-lg p-1 w-fit">
         {([
           { id: 'board', label: 'Board', icon: LayoutDashboard },
+          { id: 'dag', label: 'DAG', icon: GitFork },
           { id: 'timeline', label: 'Timeline', icon: Activity },
           { id: 'team', label: 'Team', icon: Users },
           { id: 'drift', label: 'Analytics', icon: BarChart3 },
+          ...(history.length > 0 ? [{ id: 'history' as const, label: 'History', icon: History }] : []),
         ] as const).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -215,6 +232,48 @@ function PlanDetailContent() {
         ))}
       </div>
 
+      {/* Bottleneck alert strip — shown on board tab when there are blockers */}
+      {tab === 'board' && bottlenecks.length > 0 && (
+        <div className="bg-yellow-950/40 border border-yellow-700/50 rounded-xl overflow-hidden">
+          <button
+            onClick={() => setShowBottlenecks(s => !s)}
+            className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-yellow-900/20 transition-colors"
+          >
+            <TriangleAlert size={14} className="text-yellow-400 flex-shrink-0" />
+            <span className="text-yellow-300 text-xs font-medium">
+              {bottlenecks.length} bottleneck{bottlenecks.length !== 1 ? 's' : ''} detected
+            </span>
+            <span className="text-yellow-600 text-xs ml-1">— blocking downstream tasks</span>
+            {showBottlenecks ? (
+              <ChevronDown size={12} className="ml-auto text-yellow-600" />
+            ) : (
+              <ChevronRight size={12} className="ml-auto text-yellow-600" />
+            )}
+          </button>
+          {showBottlenecks && (
+            <div className="px-4 pb-3 space-y-1.5">
+              {bottlenecks.map(b => (
+                <div key={b.task_id} className="flex items-center gap-2 text-xs">
+                  {b.is_on_critical_path && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" title="Critical path" />
+                  )}
+                  <span className="text-yellow-200">{b.name}</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] capitalize flex-shrink-0 ${
+                    b.status === 'blocked' ? 'bg-red-900 text-red-300' : 'bg-gray-800 text-gray-400'
+                  }`}>{b.status}</span>
+                  {b.successor_count > 0 && (
+                    <span className="text-yellow-600 flex-shrink-0">blocks {b.successor_count} task{b.successor_count !== 1 ? 's' : ''}</span>
+                  )}
+                  {b.is_delayed && (
+                    <span className="text-orange-400 flex-shrink-0">overdue</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {tab === 'board' && currentDag && !isGenerating && (
         <KanbanBoard
           dag={currentDag}
@@ -222,8 +281,28 @@ function PlanDetailContent() {
           onTaskUpdated={() => {
             fetchTimeline(planId!)
             fetchDrift(planId!)
+            executionService.getBottlenecks(planId!).then(setBottlenecks).catch(() => {})
           }}
         />
+      )}
+
+      {tab === 'dag' && currentDag && !isGenerating && (
+        <DagVisualization
+          dag={currentDag}
+          planId={planId!}
+          onTaskUpdated={() => {
+            fetchDag(planId!)
+            fetchTimeline(planId!)
+            fetchDrift(planId!)
+            executionService.getBottlenecks(planId!).then(setBottlenecks).catch(() => {})
+          }}
+        />
+      )}
+
+      {tab === 'dag' && isGenerating && (
+        <div className="h-[520px] bg-gray-900 border border-gray-700 rounded-xl flex items-center justify-center">
+          <p className="text-gray-500 text-sm">DAG will be available once generation completes</p>
+        </div>
       )}
 
       {tab === 'board' && isGenerating && (
@@ -251,6 +330,52 @@ function PlanDetailContent() {
         <DriftAnalyticsTab planId={planId!} driftMetric={driftMetric} />
       )}
 
+      {tab === 'history' && (
+        <div className="space-y-6">
+          {history.map(({ version, tasks }) => (
+            <div key={version} className="bg-gray-900 border border-gray-700 rounded-xl p-5">
+              <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                <History size={14} className="text-gray-500" />
+                Version {version}
+                <span className="text-xs text-gray-600 font-normal">— {tasks.length} tasks</span>
+              </h3>
+              <div className="space-y-2">
+                {tasks.map(t => (
+                  <div key={t.id} className="flex items-center justify-between py-2 border-b border-gray-800 last:border-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {t.is_on_critical_path && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" title="Critical path" />
+                      )}
+                      <span className="text-sm text-gray-300 truncate">{t.name}</span>
+                      {t.category && (
+                        <span className="text-xs text-gray-600 flex-shrink-0">{t.category}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 ml-3 shrink-0">
+                      {t.actual_hours != null && t.estimated_hours != null && (
+                        <span className={`text-xs ${t.actual_hours > t.estimated_hours ? 'text-orange-400' : 'text-emerald-400'}`}>
+                          {t.actual_hours}h / {t.estimated_hours}h est
+                        </span>
+                      )}
+                      {t.assigned_to && (
+                        <span className="text-xs text-gray-500">{t.assigned_to}</span>
+                      )}
+                      <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${
+                        t.status === 'completed' ? 'bg-emerald-900 text-emerald-300' :
+                        t.status === 'failed' ? 'bg-red-900 text-red-300' :
+                        'bg-gray-800 text-gray-400'
+                      }`}>
+                        {t.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {showSimulation && planId && (
         <SimulationPanel
           planId={planId}
@@ -271,6 +396,7 @@ function PlanDetailContent() {
             setShowRegenerate(false)
             if (planId) {
               fetchPlan(planId)
+              planService.getHistory(planId).then(setHistory).catch(() => {})
               pollPlanStatus(planId, () => { fetchDag(planId); fetchTimeline(planId) })
             }
           }}

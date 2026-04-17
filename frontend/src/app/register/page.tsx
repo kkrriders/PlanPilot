@@ -5,6 +5,18 @@ import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import { Zap } from 'lucide-react'
 
+function getStrength(pw: string): { score: number; label: string; color: string } {
+  let score = 0
+  if (pw.length >= 8) score++
+  if (/[A-Z]/.test(pw)) score++
+  if (/[0-9]/.test(pw)) score++
+  if (/[!@#$%^&*()_+\-=\[\]{}|;':",./<>?]/.test(pw)) score++
+  if (score <= 1) return { score, label: 'Weak', color: 'bg-red-500' }
+  if (score === 2) return { score, label: 'Fair', color: 'bg-yellow-500' }
+  if (score === 3) return { score, label: 'Good', color: 'bg-blue-500' }
+  return { score, label: 'Strong', color: 'bg-emerald-500' }
+}
+
 export default function RegisterPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -13,6 +25,8 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false)
   const { register, login } = useAuthStore()
   const router = useRouter()
+
+  const strength = password ? getStrength(password) : null
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -23,7 +37,8 @@ export default function RegisterPage() {
       await login(email, password)
       router.push('/dashboard')
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Registration failed')
+      const detail = err?.response?.data?.detail
+      setError(Array.isArray(detail) ? detail[0]?.msg : detail || 'Registration failed')
     } finally {
       setLoading(false)
     }
@@ -72,8 +87,24 @@ export default function RegisterPage() {
               onChange={e => setPassword(e.target.value)}
               className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
               required
-              minLength={8}
             />
+            {strength && (
+              <div className="mt-2 space-y-1">
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4].map(i => (
+                    <div
+                      key={i}
+                      className={`h-1 flex-1 rounded-full transition-all duration-300 ${
+                        i <= strength.score ? strength.color : 'bg-gray-700'
+                      }`}
+                    />
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500">
+                  {strength.label} — needs uppercase, number, and special character
+                </p>
+              </div>
+            )}
           </div>
 
           <button

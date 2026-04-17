@@ -11,6 +11,7 @@ export const executionService = {
     note?: string
     new_status?: string
     evidence_url?: string
+    actual_hours?: number
   }) => api.post(`/api/v1/plans/${planId}/execution/tasks/${taskId}/log`, data).then(r => r.data),
 
   getComplianceViolations: (planId: string) =>

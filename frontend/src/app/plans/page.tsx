@@ -1,15 +1,30 @@
 'use client'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePlanStore } from '@/store/planStore'
-import { Plus, ChevronRight } from 'lucide-react'
+import { planService } from '@/services/planService'
+import { Plus, ChevronRight, Trash2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import AuthGuard from '@/components/shared/AuthGuard'
 
 function PlanListContent() {
   const { plans, fetchPlans, loading } = usePlanStore()
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => { fetchPlans() }, [])
+
+  const handleDelete = async (e: React.MouseEvent, planId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!confirm('Delete this plan? This cannot be undone.')) return
+    setDeletingId(planId)
+    try {
+      await planService.delete(planId)
+      await fetchPlans()
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -49,38 +64,49 @@ function PlanListContent() {
 
       <div className="space-y-2">
         {plans.map(plan => (
-          <Link
-            key={plan.id}
-            href={`/plans/${plan.id}`}
-            className="flex items-center justify-between p-4 bg-gray-900 border border-gray-700 hover:border-gray-500 rounded-xl transition-colors"
-          >
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-white">{plan.title}</p>
-              <p className="text-sm text-gray-400 truncate">{plan.goal}</p>
-              <p className="text-xs text-gray-500 mt-1">
-                v{plan.current_version} · {formatDistanceToNow(new Date(plan.created_at), { addSuffix: true })}
-              </p>
-            </div>
-            <div className="flex items-center gap-3 ml-4 shrink-0">
-              {plan.risk_score != null && (
-                <div className="text-right">
-                  <p className="text-xs text-gray-500">Risk</p>
-                  <p className={`text-sm font-medium ${plan.risk_score > 0.7 ? 'text-red-400' : plan.risk_score > 0.4 ? 'text-yellow-400' : 'text-green-400'}`}>
-                    {(plan.risk_score * 100).toFixed(0)}%
-                  </p>
-                </div>
-              )}
-              <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${
-                plan.status === 'active' ? 'bg-green-900 text-green-300' :
-                plan.status === 'generating' ? 'bg-blue-900 text-blue-300' :
-                plan.status === 'completed' ? 'bg-emerald-900 text-emerald-300' :
-                'bg-gray-700 text-gray-300'
-              }`}>
-                {plan.status}
-              </span>
-              <ChevronRight size={16} className="text-gray-500" />
-            </div>
-          </Link>
+          <div key={plan.id} className="relative group">
+            <Link
+              href={`/plans/${plan.id}`}
+              className="flex items-center justify-between p-4 bg-gray-900 border border-gray-700 hover:border-gray-500 rounded-xl transition-colors"
+            >
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-white">{plan.title}</p>
+                <p className="text-sm text-gray-400 truncate">{plan.goal}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  v{plan.current_version} · {formatDistanceToNow(new Date(plan.created_at), { addSuffix: true })}
+                </p>
+              </div>
+              <div className="flex items-center gap-3 ml-4 shrink-0">
+                {plan.risk_score != null && (
+                  <div className="text-right">
+                    <p className="text-xs text-gray-500">Risk</p>
+                    <p className={`text-sm font-medium ${plan.risk_score > 0.7 ? 'text-red-400' : plan.risk_score > 0.4 ? 'text-yellow-400' : 'text-green-400'}`}>
+                      {(plan.risk_score * 100).toFixed(0)}%
+                    </p>
+                  </div>
+                )}
+                <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${
+                  plan.status === 'active' ? 'bg-green-900 text-green-300' :
+                  plan.status === 'generating' ? 'bg-blue-900 text-blue-300' :
+                  plan.status === 'completed' ? 'bg-emerald-900 text-emerald-300' :
+                  'bg-gray-700 text-gray-300'
+                }`}>
+                  {plan.status}
+                </span>
+                <ChevronRight size={16} className="text-gray-500" />
+              </div>
+            </Link>
+
+            {/* Delete button — appears on hover */}
+            <button
+              onClick={e => handleDelete(e, plan.id)}
+              disabled={deletingId === plan.id}
+              className="absolute right-14 top-1/2 -translate-y-1/2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity text-gray-600 hover:text-red-400 hover:bg-gray-800 disabled:opacity-50"
+              title="Delete plan"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
         ))}
       </div>
     </div>

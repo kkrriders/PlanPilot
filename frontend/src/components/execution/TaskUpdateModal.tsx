@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { X, Play, CheckCircle, AlertCircle, Ban, MessageSquare, Link, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { X, Play, CheckCircle, AlertCircle, Ban, MessageSquare, Link, ShieldAlert, ShieldCheck, Clock } from 'lucide-react'
 import { executionService } from '../../services/executionService'
 
 interface Props {
@@ -33,6 +33,7 @@ export default function TaskUpdateModal({ planId, task, onClose, onUpdated }: Pr
   const [pctComplete, setPctComplete] = useState(0)
   const [note, setNote] = useState('')
   const [evidenceUrl, setEvidenceUrl] = useState('')
+  const [actualHours, setActualHours] = useState('')
   const [loading, setLoading] = useState(false)
   const [serverErrors, setServerErrors] = useState<{ code: string; message: string }[]>([])
 
@@ -57,6 +58,7 @@ export default function TaskUpdateModal({ planId, task, onClose, onUpdated }: Pr
         note: note.trim(),
         new_status: selected.newStatus,
         evidence_url: evidenceUrl.trim() || undefined,
+        actual_hours: actualHours ? parseFloat(actualHours) : undefined,
       })
       onUpdated()
       onClose()
@@ -139,6 +141,28 @@ export default function TaskUpdateModal({ planId, task, onClose, onUpdated }: Pr
             <p className="text-[10px] text-gray-500 mt-1">
               Or provide a detailed note below (50+ chars) as alternative
             </p>
+          </div>
+        )}
+
+        {/* Actual hours — shown on completion */}
+        {isCompletion && (
+          <div className="mb-3">
+            <label className="flex items-center gap-1.5 text-xs text-gray-400 mb-1">
+              <Clock size={11} />
+              Actual hours spent
+              {task.estimated_hours && (
+                <span className="text-gray-600 ml-auto">est. {task.estimated_hours}h</span>
+              )}
+            </label>
+            <input
+              type="number"
+              min={0.5}
+              step={0.5}
+              value={actualHours}
+              onChange={e => setActualHours(e.target.value)}
+              placeholder={task.estimated_hours ? `${task.estimated_hours}` : 'e.g. 4.5'}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-blue-500"
+            />
           </div>
         )}
 

@@ -67,8 +67,8 @@ function PlanCreateContent() {
       // 3. Trigger generation
       await planService.generate(plan.id)
 
+      // Navigate immediately — the plan detail page owns polling from here
       router.push(`/plans/${plan.id}`)
-      pollPlanStatus(plan.id, () => {})
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'Failed to create plan')
       setLoading(false)

@@ -19,7 +19,43 @@ export const useAuthStore = create<AuthState>((set) => ({
   rehydrate: () => {
     if (typeof window !== 'undefined') {
       const token = localStorage.getItem('access_token')
-      set({ isAuthenticated: !!token, isRehydrated: true })
+      if (!token) {
+        set({ isAuthenticated: false, isRehydrated: true })
+        return
+      }
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]))
+        const isExpired = payload.exp * 1000 < Date.now()
+        if (isExpired) {
+          // Try to refresh silently before giving up
+          const refresh = localStorage.getItem('refresh_token')
+          if (refresh) {
+            import('../services/api').then(({ default: api }) => {
+              api.post('/api/v1/auth/refresh', { refresh_token: refresh })
+                .then(({ data }) => {
+                  localStorage.setItem('access_token', data.access_token)
+                  localStorage.setItem('refresh_token', data.refresh_token)
+                  set({ isAuthenticated: true, isRehydrated: true })
+                })
+                .catch(() => {
+                  localStorage.removeItem('access_token')
+                  localStorage.removeItem('refresh_token')
+                  set({ isAuthenticated: false, isRehydrated: true })
+                })
+            })
+          } else {
+            localStorage.removeItem('access_token')
+            set({ isAuthenticated: false, isRehydrated: true })
+          }
+          return
+        }
+        set({ isAuthenticated: true, isRehydrated: true })
+      } catch {
+        // Malformed token — treat as unauthenticated
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        set({ isAuthenticated: false, isRehydrated: true })
+      }
     }
   },
 
@@ -41,6 +77,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
+    const refresh = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null
+    if (refresh) {
+      // Fire-and-forget — revoke on server so the token can't be reused
+      import('../services/api').then(({ default: api }) => {
+        api.post('/api/v1/auth/logout', { refresh_token: refresh }).catch(() => {})
+      })
+    }
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
     set({ user: null, isAuthenticated: false })

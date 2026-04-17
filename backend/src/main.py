@@ -7,7 +7,7 @@ from slowapi.errors import RateLimitExceeded
 from src.core.limiter import limiter
 from src.core.config import get_settings
 from src.routes import auth, plans, tasks, execution, drift, analytics
-from src.routes import team, simulation
+from src.routes import team, simulation, users
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -49,6 +49,7 @@ app.include_router(drift.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(team.router, prefix="/api/v1")
 app.include_router(simulation.router, prefix="/api/v1")
+app.include_router(users.router, prefix="/api/v1")
 
 
 @app.get("/health")

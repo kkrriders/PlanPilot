@@ -1,4 +1,5 @@
 import asyncio
+from celery.exceptions import Ignore, Retry
 from src.workers.celery_app import celery_app
 from src.core.database import AsyncSessionLocal
 from src.services.planning.task_planner import generate_plan
@@ -10,6 +11,9 @@ def generate_plan_async(self, plan_id: str):
     loop = asyncio.new_event_loop()
     try:
         loop.run_until_complete(_run(plan_id))
+    except (SystemExit, KeyboardInterrupt, Ignore, Retry):
+        # Celery-internal signals (revoke/terminate) — do not retry
+        raise
     except Exception as exc:
         raise self.retry(exc=exc, countdown=10)
     finally:

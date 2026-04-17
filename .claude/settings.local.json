@@ -15,7 +15,24 @@
       "Bash(xargs cat:*)",
       "Bash(docker compose ps:*)",
       "Bash(docker compose logs:*)",
-      "Bash(docker compose up:*)"
+      "Bash(docker compose up:*)",
+      "Bash(ls frontend/.env*)",
+      "Bash(ls -la .env*)",
+      "Bash(where redis-server:*)",
+      "Bash(where python:*)",
+      "Bash(psql -U planpilot -d planpilot -c \"SELECT 1\")",
+      "Bash(psql -U postgres -c \"SELECT 1\")",
+      "Bash(psql -U postgres -c \"\\\\l\")",
+      "Bash(psql -c \"\\\\l\")",
+      "Bash(cat frontend/next.config.*)",
+      "Bash(node -e \"require\\('next'\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('dependencies',{}\\), indent=2\\)\\)\")",
+      "Bash(rm src/App.tsx src/app/auth/LoginPage.tsx src/app/auth/RegisterPage.tsx src/app/dashboard/DashboardPage.tsx src/app/plans/PlanCreatePage.tsx src/app/plans/PlanDetailPage.tsx src/app/plans/PlanListPage.tsx)",
+      "Bash(rmdir src/app/auth)",
+      "Bash(npm run *)",
+      "Bash(wmic logicaldisk *)",
+      "Bash(node -e \"const p=require\\('./node_modules/lucide-react/package.json'\\); console.log\\(p.version\\)\")",
+      "Bash(node *)"
     ]
   }
 }

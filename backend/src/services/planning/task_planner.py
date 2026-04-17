@@ -77,6 +77,13 @@ async def generate_plan(plan_id: str, db: AsyncSession) -> None:
         plan.goal, constraints, scheduled_tasks, critical_path_ids
     )
 
+    # Bump version so new tasks are scoped separately from historical ones
+    # (old tasks are preserved as-is for history; the DAG endpoint filters by current_version)
+    if plan.current_version > 1 or (await db.execute(
+        select(Task).where(Task.plan_id == plan.id).limit(1)
+    )).scalar_one_or_none() is not None:
+        plan.current_version += 1
+
     # Persist tasks
     task_orm_map: dict[str, Task] = {}
     for st in scheduled_tasks:
@@ -138,7 +145,7 @@ async def generate_plan(plan_id: str, db: AsyncSession) -> None:
         plan_id=plan.id,
         version=plan.current_version,
         snapshot=snapshot,
-        trigger="initial",
+        trigger="initial" if plan.current_version == 1 else "user_edit",
     )
     db.add(version)
 

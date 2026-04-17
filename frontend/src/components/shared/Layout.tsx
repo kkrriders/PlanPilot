@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
-import { LayoutDashboard, FolderKanban, LogOut, Zap } from 'lucide-react'
+import { LayoutDashboard, FolderKanban, LogOut, Zap, Settings } from 'lucide-react'
 import clsx from 'clsx'
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -13,6 +13,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const nav = [
     { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { href: '/plans', label: 'Plans', icon: FolderKanban },
+    { href: '/settings', label: 'Settings', icon: Settings },
   ]
 
   return (

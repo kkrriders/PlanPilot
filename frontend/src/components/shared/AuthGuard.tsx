@@ -18,7 +18,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     }
   }, [isAuthenticated, isRehydrated, router])
 
-  if (!isRehydrated) return null
+  if (!isRehydrated || !isAuthenticated) return null
 
   return <Layout>{children}</Layout>
 }

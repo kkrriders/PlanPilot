@@ -21,6 +21,7 @@ async def log_event(
     db: AsyncSession,
     evidence_url: str | None = None,
     compliance_flags: list | None = None,
+    actual_hours: float | None = None,
 ) -> ExecutionLog:
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
@@ -38,8 +39,10 @@ async def log_event(
     if event_type in ("completed", "failed") and not task.actual_end:
         task.actual_end = now
         if event_type == "completed":
-            # Compute actual hours if we have start time
-            if task.actual_start:
+            # Use user-provided actual hours if given; otherwise compute from start time
+            if actual_hours is not None:
+                task.actual_hours = round(actual_hours, 2)
+            elif task.actual_start:
                 delta = (now - task.actual_start).total_seconds() / 3600
                 task.actual_hours = round(delta, 2)
             task.status = "completed"

@@ -1,4 +1,4 @@
-// File: /app/src/app/plans/page.tsx
+// File: C:\Users\karti\PlanPilot\frontend\src\app\plans\page.tsx
 import * as entry from '../../../../src/app/plans/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

@@ -20,4 +20,21 @@ export const planService = {
   update: (id: string, data: Partial<Plan>) => api.patch<Plan>(`/api/v1/plans/${id}`, data).then(r => r.data),
 
   delete: (id: string) => api.delete(`/api/v1/plans/${id}`),
+
+  getHistory: (id: string) => api.get<VersionHistory[]>(`/api/v1/plans/${id}/history`).then(r => r.data),
+}
+
+export interface VersionHistory {
+  version: number
+  tasks: {
+    id: string
+    name: string
+    category: string
+    status: string
+    estimated_hours: number | null
+    actual_hours: number | null
+    assigned_to: string | null
+    is_on_critical_path: boolean
+    version: number
+  }[]
 }
