@@ -33,13 +33,15 @@ async def _run():
 
 @celery_app.task(name="src.workers.drift_tasks.compute_drift_single", queue="drift", bind=True, max_retries=2)
 def compute_drift_single(self, plan_id: str):
-    loop = asyncio.new_event_loop()
+    loop = None
     try:
+        loop = asyncio.new_event_loop()
         loop.run_until_complete(_run_single(plan_id))
     except Exception as exc:
         raise self.retry(exc=exc, countdown=10)
     finally:
-        loop.close()
+        if loop is not None:
+            loop.close()
 
 
 async def _run_single(plan_id: str):

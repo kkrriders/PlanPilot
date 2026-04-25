@@ -1,38 +1,83 @@
 """
-Replanning engine: LLM-powered replan with frozen completed tasks.
+Replanning coordinator: loads plan state, runs DriftAgent → RiskAgent → ReplannerAgent,
+then builds a diff preview and optionally commits to DB.
 """
-import json
+import logging
 import uuid
 import difflib
-from datetime import datetime, timezone
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+logger = logging.getLogger(__name__)
+
+from src.agents.shared_memory import SharedMemory
+from src.agents.drift_agent import DriftAgent
+from src.agents.risk_agent import RiskAgent
+from src.agents.replanner_agent import ReplannerAgent
 from src.models.plan import Plan, PlanVersion
 from src.models.task import Task, TaskDependency
 from src.models.drift import DriftMetric, DriftEvent
-from src.services.llm.groq_provider import sonnet
-from src.services.llm.prompt_templates import REPLAN_SYSTEM, REPLAN_USER
 from src.services.planning.dag_builder import build_dag
-from src.services.planning.plan_evaluator import evaluate_plan
 
 
 async def generate_replan_preview(plan_id: str, db: AsyncSession) -> dict:
     """
-    Generates a replan and returns a diff preview WITHOUT writing to DB.
+    Runs DriftAgent → RiskAgent → ReplannerAgent and returns a diff preview
+    WITHOUT writing anything to DB.
     """
+    drift_agent = DriftAgent()
+    risk_agent = RiskAgent()
+    replanner_agent = ReplannerAgent()
+
     plan, completed_tasks, remaining_tasks, latest_drift, drift_events = await _load_plan_state(plan_id, db)
 
-    new_raw_tasks, reasoning = await _call_llm_replan(plan, completed_tasks, remaining_tasks, latest_drift, drift_events)
+    memory = SharedMemory(
+        plan_id=plan_id,
+        goal=plan.goal,
+        constraints=plan.constraints,
+    )
+
+    # Step 1: DriftAgent — diagnose why drift happened
+    metrics = _build_metrics_dict(latest_drift)
+    completed_summary = [{"name": t.name, "actual_hours": t.actual_hours} for t in completed_tasks]
+    events_summary = [{"type": e.trigger_type, "desc": e.description} for e in drift_events]
+
+    drift_result = await drift_agent.act(
+        {
+            "metrics": metrics,
+            "drift_events": events_summary,
+            "completed_tasks": completed_summary,
+        },
+        memory,
+    )
+
+    # Step 2: RiskAgent — evaluate risk of replanning with current state
+    remaining_summary = [
+        {"name": t.name, "status": t.status, "estimated_hours": t.estimated_hours}
+        for t in remaining_tasks
+    ]
+    risk_result = await risk_agent.act({"tasks": remaining_summary}, memory)
+
+    # Step 3: ReplannerAgent — generate revised tasks
+    replan_result = await replanner_agent.act(
+        {
+            "completed_tasks": completed_summary,
+            "remaining_tasks": remaining_summary,
+        },
+        memory,
+    )
+
+    new_raw_tasks = replan_result.output.get("tasks", [])
+    reasoning = replan_result.reasoning
+
+    if not new_raw_tasks:
+        raise ValueError("ReplannerAgent returned no tasks")
 
     # Deduplicate against completed tasks
     frozen_names = {t.name.lower() for t in completed_tasks}
     new_raw_tasks = _deduplicate_tasks(new_raw_tasks, frozen_names)
 
     scheduled_new, new_critical_path_ids = build_dag(new_raw_tasks)
-    risk_score, confidence, _, _ = await evaluate_plan(
-        plan.goal, plan.constraints, scheduled_new, new_critical_path_ids
-    )
 
     current_remaining_names = {t.name for t in remaining_tasks}
     new_names = {t.name for t in scheduled_new}
@@ -53,33 +98,33 @@ async def generate_replan_preview(plan_id: str, db: AsyncSession) -> dict:
         "removed": [{"name": t.name, "id": str(t.id)} for t in removed],
         "modified": [{"name": t.name, "new_estimated_hours": t.estimated_hours} for t in modified],
         "new_critical_path": [t.name for t in scheduled_new if t.id in new_critical_path_ids],
-        "new_risk_score": round(risk_score, 3),
-        "new_confidence": round(confidence, 3),
+        "new_risk_score": round(float(risk_result.output.get("risk_score", 0.5)), 3),
+        "new_confidence": round(replan_result.confidence, 3),
         "reasoning": reasoning,
-        "_scheduled_new": scheduled_new,  # internal, stripped before returning to API
+        "drift_analysis": drift_result.output,
+        "_scheduled_new": scheduled_new,
         "_new_critical_path_ids": new_critical_path_ids,
     }
 
 
 async def apply_replan(plan_id: str, preview: dict, db: AsyncSession) -> PlanVersion:
-    """
-    Commits the replan: creates new tasks, marks removed tasks as skipped,
-    increments plan version, and creates a PlanVersion snapshot.
-    """
+    """Commits the replan preview to DB."""
     plan_result = await db.execute(select(Plan).where(Plan.id == plan_id))
     plan = plan_result.scalar_one_or_none()
     if not plan:
         raise ValueError(f"Plan {plan_id} not found")
 
-    # Use copies to avoid mutating the caller's dict
     scheduled_new = preview["_scheduled_new"]
     new_critical_path_ids = preview["_new_critical_path_ids"]
 
-    # Mark removed tasks as skipped
     removed_names = {r["name"] for r in preview["removed"]}
     if removed_names:
         task_result = await db.execute(
-            select(Task).where(Task.plan_id == plan.id, Task.name.in_(removed_names))
+            select(Task).where(
+                Task.plan_id == plan.id,
+                Task.version == plan.current_version,
+                Task.name.in_(removed_names),
+            )
         )
         for task in task_result.scalars().all():
             task.status = "skipped"
@@ -87,9 +132,8 @@ async def apply_replan(plan_id: str, preview: dict, db: AsyncSession) -> PlanVer
     new_version = plan.current_version + 1
     plan.current_version = new_version
 
-    # Persist new tasks
     for st in scheduled_new:
-        task = Task(
+        db.add(Task(
             id=uuid.UUID(st.id),
             plan_id=plan.id,
             version=new_version,
@@ -102,39 +146,38 @@ async def apply_replan(plan_id: str, preview: dict, db: AsyncSession) -> PlanVer
             planned_start=st.planned_start,
             planned_end=st.planned_end,
             is_on_critical_path=st.is_on_critical_path,
-        )
-        db.add(task)
+        ))
 
     await db.flush()
 
     for st in scheduled_new:
         for pred_id in st.dependencies:
-            dep = TaskDependency(
+            db.add(TaskDependency(
                 plan_id=plan.id,
                 predecessor_id=uuid.UUID(pred_id),
                 successor_id=uuid.UUID(st.id),
-            )
-            db.add(dep)
+            ))
 
-    # Mark drift events as replanned
-    from sqlalchemy import update
     await db.execute(
         update(DriftEvent)
         .where(DriftEvent.plan_id == plan.id, DriftEvent.was_replanned == False)  # noqa: E712
         .values(was_replanned=True)
     )
 
-    # Build snapshot
     snapshot = {
         "tasks": [
-            {"id": st.id, "name": st.name, "estimated_hours": st.estimated_hours,
-             "is_on_critical_path": st.is_on_critical_path,
-             "planned_start": st.planned_start.isoformat(), "planned_end": st.planned_end.isoformat()}
+            {
+                "id": st.id, "name": st.name, "estimated_hours": st.estimated_hours,
+                "is_on_critical_path": st.is_on_critical_path,
+                "planned_start": st.planned_start.isoformat(),
+                "planned_end": st.planned_end.isoformat(),
+            }
             for st in scheduled_new
         ],
         "critical_path_ids": new_critical_path_ids,
         "risk_score": preview["new_risk_score"],
         "replan_reasoning": preview.get("reasoning", ""),
+        "drift_analysis": preview.get("drift_analysis", {}),
     }
 
     version = PlanVersion(
@@ -158,7 +201,9 @@ async def _load_plan_state(plan_id: str, db: AsyncSession):
     if not plan:
         raise ValueError(f"Plan {plan_id} not found")
 
-    task_result = await db.execute(select(Task).where(Task.plan_id == plan.id))
+    task_result = await db.execute(
+        select(Task).where(Task.plan_id == plan.id, Task.version == plan.current_version)
+    )
     all_tasks = task_result.scalars().all()
 
     completed = [t for t in all_tasks if t.status in ("completed", "failed")]
@@ -182,38 +227,30 @@ async def _load_plan_state(plan_id: str, db: AsyncSession):
     return plan, completed, remaining, latest_drift, drift_events
 
 
-async def _call_llm_replan(plan, completed_tasks, remaining_tasks, latest_drift, drift_events) -> tuple[list[dict], str]:
-    completed_summary = [{"name": t.name, "actual_hours": t.actual_hours} for t in completed_tasks]
-    remaining_summary = [
-        {"name": t.name, "status": t.status, "estimated_hours": t.estimated_hours}
-        for t in remaining_tasks
-    ]
-    events_summary = [{"type": e.trigger_type, "desc": e.description} for e in drift_events]
-
-    prompt = REPLAN_USER.format(
-        goal=plan.goal,
-        constraints=json.dumps(plan.constraints, indent=2),
-        schedule_drift_pct=latest_drift.schedule_drift_pct if latest_drift else 0,
-        effort_drift_pct=latest_drift.effort_drift_pct if latest_drift else 0,
-        severity=latest_drift.severity if latest_drift else "unknown",
-        completed_tasks=json.dumps(completed_summary, indent=2),
-        remaining_tasks=json.dumps(remaining_summary, indent=2),
-        drift_events=json.dumps(events_summary, indent=2),
-    )
-
-    result = await sonnet.complete_json(REPLAN_SYSTEM, prompt, max_tokens=4096)
-    return result.get("tasks", []), result.get("reasoning", "")
+def _build_metrics_dict(drift: DriftMetric | None) -> dict:
+    if not drift:
+        return {}
+    return {
+        "schedule_drift_pct": drift.schedule_drift_pct or 0,
+        "effort_drift_pct": drift.effort_drift_pct or 0,
+        "scope_drift_pct": drift.scope_drift_pct or 0,
+        "overall_drift": drift.overall_drift or 0,
+        "severity": drift.severity or "none",
+        "details": drift.details or {},
+    }
 
 
 def _deduplicate_tasks(new_tasks: list[dict], frozen_names: set[str]) -> list[dict]:
-    """Remove tasks that are near-duplicates of completed (frozen) tasks."""
-    clean = []
+    kept = []
     for task in new_tasks:
         name_lower = task["name"].lower()
-        is_duplicate = any(
-            difflib.SequenceMatcher(None, name_lower, frozen).ratio() > 0.85
-            for frozen in frozen_names
+        match = next(
+            (f for f in frozen_names
+             if difflib.SequenceMatcher(None, name_lower, f).ratio() > 0.85),
+            None,
         )
-        if not is_duplicate:
-            clean.append(task)
-    return clean
+        if match:
+            logger.debug("Dedup dropped '%s' — similar to completed task '%s'", task["name"], match)
+        else:
+            kept.append(task)
+    return kept

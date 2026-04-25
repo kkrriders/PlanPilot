@@ -10,6 +10,9 @@ from src.models.plan import Plan
 from src.models.task import Task, TaskDependency
 from src.schemas.task import TaskCreate, TaskUpdate, TaskOut, DependencyCreate
 from src.utils.graph import has_cycle
+from src.workers.drift_tasks import compute_drift_single
+
+_DRIFT_TRIGGER_STATUSES = {"completed", "failed", "blocked"}
 
 router = APIRouter(prefix="/plans/{plan_id}/tasks", tags=["tasks"])
 
@@ -20,8 +23,12 @@ async def list_tasks(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _check_plan_ownership(plan_id, current_user.id, db)
-    result = await db.execute(select(Task).where(Task.plan_id == plan_id).order_by(Task.planned_start))
+    plan = await _check_plan_ownership(plan_id, current_user.id, db)
+    result = await db.execute(
+        select(Task)
+        .where(Task.plan_id == plan_id, Task.version == plan.current_version)
+        .order_by(Task.planned_start)
+    )
     return result.scalars().all()
 
 
@@ -47,7 +54,7 @@ async def create_task(
     await db.flush()
 
     for pred_id in body.dependency_ids:
-        await _add_dependency_safe(plan_id, pred_id, task.id, db)
+        await _add_dependency_safe(plan_id, pred_id, task.id, db, plan.current_version)
 
     await db.commit()
     await db.refresh(task)
@@ -65,11 +72,16 @@ async def update_task(
     await _check_plan_ownership(plan_id, current_user.id, db)
     task = await _get_task_or_404(task_id, plan_id, db)
 
+    prev_status = task.status
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(task, field, value)
 
     await db.commit()
     await db.refresh(task)
+
+    if body.status and body.status != prev_status and body.status in _DRIFT_TRIGGER_STATUSES:
+        compute_drift_single.apply_async(args=[str(plan_id)], countdown=2)
+
     return task
 
 
@@ -98,8 +110,8 @@ async def add_dependency(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _check_plan_ownership(plan_id, current_user.id, db)
-    dep = await _add_dependency_safe(plan_id, body.predecessor_id, task_id, db)
+    plan = await _check_plan_ownership(plan_id, current_user.id, db)
+    dep = await _add_dependency_safe(plan_id, body.predecessor_id, task_id, db, plan.current_version)
     await db.commit()
     return {"id": str(dep.id), "predecessor_id": str(dep.predecessor_id), "successor_id": str(dep.successor_id)}
 
@@ -120,12 +132,15 @@ async def remove_dependency(
         await db.commit()
 
 
-async def _add_dependency_safe(plan_id, pred_id, succ_id, db):
-    """Add dependency with cycle check."""
+async def _add_dependency_safe(plan_id, pred_id, succ_id, db, current_version: int = None):
+    """Add dependency with cycle check scoped to current plan version."""
     dep_result = await db.execute(select(TaskDependency).where(TaskDependency.plan_id == plan_id))
     existing_edges = [(str(d.predecessor_id), str(d.successor_id)) for d in dep_result.scalars().all()]
 
-    task_result = await db.execute(select(Task).where(Task.plan_id == plan_id))
+    task_query = select(Task).where(Task.plan_id == plan_id)
+    if current_version is not None:
+        task_query = task_query.where(Task.version == current_version)
+    task_result = await db.execute(task_query)
     all_tasks = task_result.scalars().all()
     node_ids = [str(t.id) for t in all_tasks]
 

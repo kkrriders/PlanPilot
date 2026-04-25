@@ -1,93 +1,83 @@
 """
-Orchestrates: adaptive weights → LLM decomposition → DAG → evaluation → store.
+Planning coordinator: loads DB context, runs the multi-agent orchestrator,
+then persists the result. Agents live in src/agents/.
 """
-import json
+import logging
+import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-import uuid
 
-from src.services.llm.groq_provider import sonnet
-from src.services.llm.prompt_templates import DECOMPOSITION_SYSTEM, DECOMPOSITION_USER
+from src.agents.multi_agent_orchestrator import MultiAgentOrchestrator, PlanningMode
 from src.services.planning.dag_builder import build_dag
 from src.services.planning.constraint_engine import validate_constraints
-from src.services.planning.plan_evaluator import evaluate_plan
 from src.models.plan import Plan, PlanVersion
 from src.models.task import Task, TaskDependency
 from src.models.learning import AdaptiveWeight
 from src.models.team import TeamMember
 
+logger = logging.getLogger(__name__)
 
-async def generate_plan(plan_id: str, db: AsyncSession) -> None:
-    """
-    Full planning pipeline. Called from Celery task.
-    Updates the plan in-place: sets tasks, risk score, and status.
-    """
+
+async def generate_plan(plan_id: str, db: AsyncSession, mode: PlanningMode = "accurate") -> None:
     result = await db.execute(select(Plan).where(Plan.id == plan_id))
     plan = result.scalar_one_or_none()
     if not plan:
-        return
+        raise ValueError(f"Plan {plan_id} not found")
 
     constraints = plan.constraints
-
-    # Load adaptive weights and team members
     adaptive_context = await _load_adaptive_context(str(plan.user_id), db)
     team_context = await _load_team_context(plan_id, db)
 
-    # Call LLM
-    prompt = DECOMPOSITION_USER.format(
-        goal=plan.goal,
-        deadline_days=constraints.get("deadline_days", "not specified"),
-        team_size=constraints.get("team_size", "not specified"),
-        budget_usd=constraints.get("budget_usd", "not specified"),
-        tech_stack=", ".join(constraints.get("tech_stack", [])) or "not specified",
-        notes=constraints.get("notes", "none"),
-        team_context=team_context,
-        adaptive_context=adaptive_context,
-    )
-
+    orchestrator = MultiAgentOrchestrator(mode=mode)
     try:
-        llm_result = await sonnet.complete_json(DECOMPOSITION_SYSTEM, prompt, max_tokens=4096)
-        raw_tasks = llm_result["tasks"]
-    except Exception as e:
+        orch_result = await orchestrator.run_planning(
+            plan_id=plan_id,
+            goal=plan.goal,
+            constraints=constraints,
+            adaptive_context=adaptive_context,
+            team_context=team_context,
+        )
+    except Exception:
+        logger.exception("Orchestrator failed for plan_id=%s", plan_id)
         plan.status = "failed"
-        plan.metadata_ = {"error": str(e)} if hasattr(plan, "metadata_") else {}
+        await db.commit()
+        raise
+
+    raw_tasks = orch_result.tasks
+    if not raw_tasks:
+        logger.warning("Orchestrator returned no tasks for plan_id=%s (mode=%s)", plan_id, mode)
+        plan.status = "failed"
         await db.commit()
         return
 
-    # Apply adaptive weight bias adjustments
-    raw_tasks = _apply_adaptive_bias(raw_tasks, await _get_weights(str(plan.user_id), db))
+    weights = await _get_weights(str(plan.user_id), db)
+    raw_tasks = _apply_adaptive_bias(raw_tasks, weights)
 
-    # Build DAG + schedule
     try:
         scheduled_tasks, critical_path_ids = build_dag(raw_tasks)
-    except ValueError as e:
+    except ValueError:
+        logger.exception("DAG build failed for plan_id=%s", plan_id)
         plan.status = "failed"
         await db.commit()
         return
 
-    # Constraint validation
     constraint_result = validate_constraints(
         constraints,
         [{"estimated_hours": t.estimated_hours} for t in scheduled_tasks],
-        critical_path_hours=sum(t.estimated_hours for t in scheduled_tasks if t.id in critical_path_ids),
+        critical_path_hours=sum(
+            t.estimated_hours for t in scheduled_tasks if t.id in critical_path_ids
+        ),
     )
+    if constraint_result.violations:
+        logger.warning(
+            "Constraint violations for plan_id=%s: %s", plan_id, constraint_result.violations
+        )
 
-    # Risk evaluation
-    risk_score, confidence, risk_factors, recommendations = await evaluate_plan(
-        plan.goal, constraints, scheduled_tasks, critical_path_ids
-    )
+    # Always bump version on regeneration — version 1 is reserved for the first successful plan.
+    plan.current_version += 1
 
-    # Bump version so new tasks are scoped separately from historical ones
-    # (old tasks are preserved as-is for history; the DAG endpoint filters by current_version)
-    if plan.current_version > 1 or (await db.execute(
-        select(Task).where(Task.plan_id == plan.id).limit(1)
-    )).scalar_one_or_none() is not None:
-        plan.current_version += 1
-
-    # Persist tasks
-    task_orm_map: dict[str, Task] = {}
     for st in scheduled_tasks:
-        task = Task(
+        db.add(Task(
             id=uuid.UUID(st.id),
             plan_id=plan.id,
             version=plan.current_version,
@@ -100,26 +90,19 @@ async def generate_plan(plan_id: str, db: AsyncSession) -> None:
             planned_start=st.planned_start,
             planned_end=st.planned_end,
             is_on_critical_path=st.is_on_critical_path,
-            metadata_={
-                "risk_factors": risk_factors if st.is_on_critical_path else [],
-            },
-        )
-        db.add(task)
-        task_orm_map[st.id] = task
+            metadata_={"risk_factors": orch_result.risk_factors if st.is_on_critical_path else []},
+        ))
 
     await db.flush()
 
-    # Persist dependencies
     for st in scheduled_tasks:
         for pred_id in st.dependencies:
-            dep = TaskDependency(
+            db.add(TaskDependency(
                 plan_id=plan.id,
                 predecessor_id=uuid.UUID(pred_id),
                 successor_id=uuid.UUID(st.id),
-            )
-            db.add(dep)
+            ))
 
-    # Build snapshot for version history
     snapshot = {
         "tasks": [
             {
@@ -133,26 +116,27 @@ async def generate_plan(plan_id: str, db: AsyncSession) -> None:
             for st in scheduled_tasks
         ],
         "critical_path_ids": critical_path_ids,
-        "risk_score": risk_score,
-        "confidence": confidence,
-        "risk_factors": risk_factors,
-        "recommendations": recommendations,
+        "risk_score": orch_result.risk_score,
+        "confidence": orch_result.confidence,
+        "risk_factors": orch_result.risk_factors,
+        "recommendations": orch_result.recommendations,
+        "critic_score": orch_result.critic_score,
+        "iterations_used": orch_result.iterations_used,
+        "planner_reasoning": orch_result.planner_reasoning,
         "constraint_violations": constraint_result.violations,
         "constraint_warnings": constraint_result.warnings,
     }
 
-    version = PlanVersion(
+    db.add(PlanVersion(
         plan_id=plan.id,
         version=plan.current_version,
         snapshot=snapshot,
         trigger="initial" if plan.current_version == 1 else "user_edit",
-    )
-    db.add(version)
+    ))
 
-    # Update plan
     plan.status = "active"
-    plan.risk_score = risk_score
-    plan.confidence = confidence
+    plan.risk_score = orch_result.risk_score
+    plan.confidence = orch_result.confidence
 
     await db.commit()
 
@@ -164,10 +148,10 @@ async def _load_team_context(plan_id: str, db: AsyncSession) -> str:
     members = result.scalars().all()
     if not members:
         return "No team members defined — leave assigned_to as null."
-    lines = []
-    for m in members:
-        skills_str = ", ".join(m.skills) if m.skills else "general"
-        lines.append(f"- {m.name} ({m.role}): {skills_str}")
+    lines = [
+        f"- {m.name} ({m.role}): {', '.join(m.skills) if m.skills else 'general'}"
+        for m in members
+    ]
     return "\n".join(lines)
 
 
@@ -195,21 +179,19 @@ async def _get_weights(user_id: str, db: AsyncSession) -> list[AdaptiveWeight]:
 
 
 def _apply_adaptive_bias(tasks: list[dict], weights: list[AdaptiveWeight]) -> list[dict]:
-    """Adjust estimated_hours based on learned category biases."""
-    bias_map: dict[str, float] = {}
-    for w in weights:
-        if w.key.startswith("category_bias_") and w.sample_count >= 3:
-            category = w.key.replace("category_bias_", "")
-            bias_map[category] = w.value  # multiplier
-
+    bias_map: dict[str, float] = {
+        w.key.replace("category_bias_", ""): w.value
+        for w in weights
+        if w.key.startswith("category_bias_") and w.sample_count >= 3
+    }
     if not bias_map:
         return tasks
-
     adjusted = []
     for task in tasks:
         t = dict(task)
         category = t.get("category", "")
         if category in bias_map:
-            t["estimated_hours"] = round((t.get("estimated_hours", 8.0) * bias_map[category]), 1)
+            raw_hours = t.get("estimated_hours") or 8.0
+            t["estimated_hours"] = max(0.5, round(raw_hours * bias_map[category], 1))
         adjusted.append(t)
     return adjusted

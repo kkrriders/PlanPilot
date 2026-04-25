@@ -3,7 +3,7 @@ Unit tests for plan risk heuristic scoring.
 No LLM calls involved.
 """
 import pytest
-from src.services.planning.plan_evaluator import _heuristic_risk
+from src.agents.risk_agent import heuristic_risk as _heuristic_risk
 
 
 class TestHeuristicRisk:

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import uuid
@@ -48,6 +48,7 @@ async def create_plan(
 async def trigger_generate(
     request: Request,
     plan_id: uuid.UUID,
+    mode: str = Query(default="accurate", pattern="^(fast|accurate|debate)$"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -63,7 +64,7 @@ async def trigger_generate(
     # If a generation is in flight, revoke it before starting a new one
     if plan.status == "generating" and plan.job_id:
         celery_app.control.revoke(plan.job_id, terminate=True)
-    job = generate_plan_async.delay(str(plan.id))
+    job = generate_plan_async.delay(str(plan.id), mode)
     plan.status = "generating"
     plan.job_id = job.id
     await db.commit()
