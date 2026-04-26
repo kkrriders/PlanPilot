@@ -22,6 +22,10 @@ export const planService = {
 
   delete: (id: string) => api.delete(`/api/v1/plans/${id}`),
 
+  complete: (id: string) => api.post(`/api/v1/plans/${id}/complete`).then(r => r.data),
+
+  listArchived: () => api.get<ArchivedPlan[]>('/api/v1/plans/archived').then(r => r.data),
+
   getHistory: (id: string) => api.get<VersionHistory[]>(`/api/v1/plans/${id}/history`).then(r => r.data),
 
   getReasoning: (id: string) => api.get<PlanReasoning>(`/api/v1/plans/${id}/reasoning`).then(r => r.data),
@@ -35,7 +39,7 @@ export interface DebateEntry {
   planner_reasoning: string
   risk_factors: string[]
   risk_challenges: string[]
-  critic_issues: string[]
+  critic_issues: Array<{ type: string; task: string | null; description: string } | string>
   critic_strengths: string[]
 }
 
@@ -45,6 +49,23 @@ export interface PlanReasoning {
   planner_reasoning: string
   iterations_used: number
   critic_score: number
+}
+
+export interface ArchivedPlan {
+  id: string
+  title: string
+  goal: string
+  created_at: string
+  completed_at: string
+  risk_score: number | null
+  confidence: number | null
+  total_tasks: number
+  completed_tasks: number
+  completion_rate: number
+  estimated_hours: number
+  actual_hours: number | null
+  versions: number
+  drift_events: number
 }
 
 export interface VersionHistory {

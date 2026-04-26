@@ -3,13 +3,14 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
-import { LayoutDashboard, FolderKanban, LogOut, Zap, Settings, Menu, X } from 'lucide-react'
+import { LayoutDashboard, FolderKanban, LogOut, Zap, Settings, Menu, X, Archive } from 'lucide-react'
 import clsx from 'clsx'
 import ToastContainer from './ToastContainer'
 
 const NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/plans',     label: 'Plans',     icon: FolderKanban    },
+  { href: '/history',   label: 'History',   icon: Archive         },
   { href: '/settings',  label: 'Settings',  icon: Settings        },
 ]
 

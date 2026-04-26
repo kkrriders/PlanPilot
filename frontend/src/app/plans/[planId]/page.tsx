@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import clsx from 'clsx'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { usePlanStore } from '@/store/planStore'
 import { useExecutionStore } from '@/store/executionStore'
 import KanbanBoard from '@/components/planning/KanbanBoard'
@@ -16,7 +16,7 @@ import DriftAnalyticsTab from '@/components/execution/DriftAnalyticsTab'
 import ComplianceTab from '@/components/execution/ComplianceTab'
 import { executionService } from '@/services/executionService'
 import { planService, type VersionHistory } from '@/services/planService'
-import { Activity, LayoutDashboard, BarChart3, RefreshCw, Users, RotateCcw, AlertCircle, Settings, Bot, History, GitFork, ChevronDown, ChevronRight, TriangleAlert, Download, ShieldAlert } from 'lucide-react'
+import { Activity, LayoutDashboard, BarChart3, RefreshCw, Users, RotateCcw, AlertCircle, Settings, Bot, History, GitFork, ChevronDown, ChevronRight, TriangleAlert, Download, ShieldAlert, CheckCircle2 } from 'lucide-react'
 import AuthGuard from '@/components/shared/AuthGuard'
 import { useToastStore } from '@/store/toastStore'
 
@@ -34,6 +34,7 @@ interface BottleneckItem {
 function PlanDetailContent() {
   const params = useParams<{ planId: string }>()
   const planId = params.planId
+  const router = useRouter()
   const { currentPlan, currentDag, fetchPlan, fetchDag, pollPlanStatus } = usePlanStore()
   const { timeline, driftMetric, replanPreview, fetchTimeline, fetchDrift, fetchReplanPreview, clearReplanPreview } = useExecutionStore()
   const [tab, setTab] = useState<Tab>('board')
@@ -44,7 +45,22 @@ function PlanDetailContent() {
   const [history, setHistory] = useState<VersionHistory[]>([])
   const [bottlenecks, setBottlenecks] = useState<BottleneckItem[]>([])
   const [showBottlenecks, setShowBottlenecks] = useState(true)
+  const [completing, setCompleting] = useState(false)
   const { toast } = useToastStore()
+
+  const handleCompletePlan = async () => {
+    if (!planId) return
+    setCompleting(true)
+    try {
+      await planService.complete(planId)
+      toast('Plan marked as complete — it has been archived', 'success')
+      router.push('/history')
+    } catch {
+      toast('Failed to complete plan', 'error')
+    } finally {
+      setCompleting(false)
+    }
+  }
 
   const handleExportCsv = () => {
     if (!currentDag || !currentPlan) return
@@ -193,6 +209,16 @@ function PlanDetailContent() {
                 <Settings size={12} />
                 Edit & Regenerate
               </button>
+              {currentPlan.status === 'active' && (
+                <button
+                  onClick={handleCompletePlan}
+                  disabled={completing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 border border-emerald-600 text-white rounded-lg transition-colors"
+                >
+                  <CheckCircle2 size={12} />
+                  {completing ? 'Completing...' : 'Mark Complete'}
+                </button>
+              )}
             </div>
           )}
         </div>

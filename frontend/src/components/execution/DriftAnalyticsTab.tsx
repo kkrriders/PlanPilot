@@ -297,9 +297,13 @@ export default function DriftAnalyticsTab({ planId, driftMetric }: Props) {
                             <p className="text-[11px] font-medium text-yellow-300">Critic issues</p>
                           </div>
                           <ul className="space-y-1">
-                            {entry.critic_issues.map((c, i) => (
+                            {entry.critic_issues.map((c: any, i) => (
                               <li key={i} className="text-xs text-gray-400 flex gap-2">
-                                <span className="text-yellow-500 flex-shrink-0">·</span>{c}
+                                <span className="text-yellow-500 flex-shrink-0">·</span>
+                                <span>
+                                  {c.task && <span className="text-gray-300">{c.task}: </span>}
+                                  {c.description ?? String(c)}
+                                </span>
                               </li>
                             ))}
                           </ul>

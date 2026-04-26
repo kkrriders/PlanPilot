@@ -12,6 +12,8 @@ from src.schemas.plan import PlanCreate, PlanUpdate, PlanOut, PlanVersionOut, Da
 from src.workers.planning_tasks import generate_plan_async
 from src.workers.celery_app import celery_app
 from src.core.limiter import limiter
+from src.services.learning.adaptive_weights import update_weights_after_completion
+from src.models.drift import DriftEvent
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 
@@ -79,15 +81,86 @@ async def list_plans(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    limit = min(limit, 100)  # cap at 100
+    limit = min(limit, 100)
     result = await db.execute(
         select(Plan)
-        .where(Plan.user_id == current_user.id)
+        .where(Plan.user_id == current_user.id, Plan.status != "completed")
         .order_by(Plan.created_at.desc())
         .limit(limit)
         .offset(offset)
     )
     return result.scalars().all()
+
+
+@router.get("/archived")
+async def list_archived_plans(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns completed plans with summary stats for the history page."""
+    result = await db.execute(
+        select(Plan)
+        .where(Plan.user_id == current_user.id, Plan.status == "completed")
+        .order_by(Plan.updated_at.desc())
+    )
+    plans = result.scalars().all()
+
+    summaries = []
+    for plan in plans:
+        task_result = await db.execute(
+            select(Task).where(Task.plan_id == plan.id, Task.version == plan.current_version)
+        )
+        tasks = task_result.scalars().all()
+
+        total_tasks = len(tasks)
+        completed_tasks = sum(1 for t in tasks if t.status == "completed")
+        estimated_hours = sum(t.estimated_hours or 0 for t in tasks)
+        actual_hours = sum(t.actual_hours or 0 for t in tasks if t.actual_hours)
+
+        version_result = await db.execute(
+            select(PlanVersion).where(PlanVersion.plan_id == plan.id).order_by(PlanVersion.version)
+        )
+        versions = version_result.scalars().all()
+
+        drift_result = await db.execute(
+            select(DriftEvent).where(DriftEvent.plan_id == plan.id)
+        )
+        drift_count = len(drift_result.scalars().all())
+
+        summaries.append({
+            "id": str(plan.id),
+            "title": plan.title,
+            "goal": plan.goal,
+            "created_at": plan.created_at.isoformat(),
+            "completed_at": plan.updated_at.isoformat(),
+            "risk_score": plan.risk_score,
+            "confidence": plan.confidence,
+            "total_tasks": total_tasks,
+            "completed_tasks": completed_tasks,
+            "completion_rate": round(completed_tasks / total_tasks * 100) if total_tasks else 0,
+            "estimated_hours": round(estimated_hours, 1),
+            "actual_hours": round(actual_hours, 1) if actual_hours else None,
+            "versions": len(versions),
+            "drift_events": drift_count,
+        })
+
+    return summaries
+
+
+@router.post("/{plan_id}/complete")
+async def complete_plan(
+    plan_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Marks a plan as completed and archives it."""
+    plan = await _get_plan_or_404(plan_id, current_user.id, db)
+    if plan.status not in ("active", "paused"):
+        raise HTTPException(status_code=400, detail=f"Cannot complete a plan with status '{plan.status}'")
+    plan.status = "completed"
+    await db.commit()
+    await update_weights_after_completion(str(plan_id), db)
+    return {"status": "completed", "plan_id": str(plan_id)}
 
 
 @router.get("/{plan_id}", response_model=PlanOut)
