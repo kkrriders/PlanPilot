@@ -2,17 +2,25 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePlanStore } from '@/store/planStore'
-import { TrendingUp, Activity, CheckCircle, AlertTriangle, Plus } from 'lucide-react'
+import { TrendingUp, Activity, CheckCircle, AlertTriangle, Plus, TrendingDown, Brain } from 'lucide-react'
 import api from '@/services/api'
 import AuthGuard from '@/components/shared/AuthGuard'
+
+interface AdaptiveWeight {
+  key: string
+  value: number
+  sample_count: number
+}
 
 function DashboardContent() {
   const { plans, fetchPlans } = usePlanStore()
   const [summary, setSummary] = useState<any>(null)
+  const [weights, setWeights] = useState<AdaptiveWeight[]>([])
 
   useEffect(() => {
     fetchPlans()
     api.get('/api/v1/analytics/summary').then(r => setSummary(r.data)).catch(() => {})
+    api.get('/api/v1/analytics/weights').then(r => setWeights(r.data.weights ?? [])).catch(() => {})
   }, [])
 
   const recentPlans = [...plans].slice(0, 5)
@@ -23,6 +31,18 @@ function DashboardContent() {
     { label: 'Completed', value: summary?.completed_plans ?? plans.filter(p => p.status === 'completed').length, icon: CheckCircle, color: 'text-emerald-400' },
     { label: 'Avg Risk', value: summary?.avg_risk_score ? `${(summary.avg_risk_score * 100).toFixed(0)}%` : '—', icon: AlertTriangle, color: 'text-yellow-400' },
   ]
+
+  // Build insights from adaptive weights (only show if enough data)
+  const insights = weights
+    .filter(w => w.sample_count >= 3 && w.key.startsWith('category_bias_'))
+    .map(w => {
+      const category = w.key.replace('category_bias_', '')
+      const biasPct = Math.abs((w.value - 1.0) * 100)
+      const over = w.value > 1.0
+      return { category, biasPct: Math.round(biasPct), over }
+    })
+    .filter(i => i.biasPct >= 5)
+    .sort((a, b) => b.biasPct - a.biasPct)
 
   return (
     <div className="space-y-6">
@@ -46,6 +66,46 @@ function DashboardContent() {
           </div>
         ))}
       </div>
+
+      {/* Estimation bias insights — only shown when there's enough data */}
+      {insights.length > 0 && (
+        <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Brain size={16} className="text-purple-400" />
+            <h2 className="font-semibold text-white">Estimation Insights</h2>
+            <span className="text-xs text-gray-500 ml-1">— learned from your completed tasks</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {insights.map(({ category, biasPct, over }) => (
+              <div
+                key={category}
+                className={`flex items-center gap-3 p-3 rounded-lg border ${
+                  over
+                    ? 'bg-orange-950/30 border-orange-700/40'
+                    : 'bg-blue-950/30 border-blue-700/40'
+                }`}
+              >
+                <div className={over ? 'text-orange-400' : 'text-blue-400'}>
+                  {over ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-white capitalize">{category}</p>
+                  <p className="text-xs text-gray-400">
+                    {over ? 'Overestimated' : 'Underestimated'} by{' '}
+                    <span className={`font-semibold ${over ? 'text-orange-400' : 'text-blue-400'}`}>
+                      {biasPct}%
+                    </span>{' '}
+                    on average
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-gray-600 mt-3">
+            These biases are automatically applied when generating new plans.
+          </p>
+        </div>
+      )}
 
       <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
         <h2 className="font-semibold text-white mb-4">Recent Plans</h2>

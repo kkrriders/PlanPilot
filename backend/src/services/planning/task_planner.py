@@ -27,6 +27,7 @@ async def generate_plan(plan_id: str, db: AsyncSession, mode: PlanningMode = "ac
     constraints = plan.constraints
     adaptive_context = await _load_adaptive_context(str(plan.user_id), db)
     team_context = await _load_team_context(plan_id, db)
+    completed_tasks = await _load_completed_tasks(plan_id, plan.current_version, db)
 
     orchestrator = MultiAgentOrchestrator(mode=mode)
     try:
@@ -36,6 +37,7 @@ async def generate_plan(plan_id: str, db: AsyncSession, mode: PlanningMode = "ac
             constraints=constraints,
             adaptive_context=adaptive_context,
             team_context=team_context,
+            completed_tasks=completed_tasks,
         )
     except Exception:
         logger.exception("Orchestrator failed for plan_id=%s", plan_id)
@@ -75,6 +77,37 @@ async def generate_plan(plan_id: str, db: AsyncSession, mode: PlanningMode = "ac
 
     # Always bump version on regeneration — version 1 is reserved for the first successful plan.
     plan.current_version += 1
+
+    # Carry completed tasks into the new version so they stay visible on the board
+    completed_name_map: dict[str, uuid.UUID] = {}
+    if completed_tasks:
+        existing = await db.execute(
+            select(Task).where(
+                Task.plan_id == plan.id,
+                Task.version == plan.current_version - 1,
+                Task.status.in_(["completed", "in_progress"]),
+            )
+        )
+        for ct in existing.scalars().all():
+            new_id = uuid.uuid4()
+            db.add(Task(
+                id=new_id,
+                plan_id=plan.id,
+                version=plan.current_version,
+                name=ct.name,
+                description=ct.description,
+                category=ct.category,
+                priority=ct.priority,
+                estimated_hours=ct.estimated_hours,
+                actual_hours=ct.actual_hours,
+                assigned_to=ct.assigned_to,
+                planned_start=ct.planned_start,
+                planned_end=ct.planned_end,
+                is_on_critical_path=False,
+                status=ct.status,
+            ))
+            completed_name_map[ct.name] = new_id
+        await db.flush()
 
     for st in scheduled_tasks:
         db.add(Task(
@@ -125,6 +158,8 @@ async def generate_plan(plan_id: str, db: AsyncSession, mode: PlanningMode = "ac
         "planner_reasoning": orch_result.planner_reasoning,
         "constraint_violations": constraint_result.violations,
         "constraint_warnings": constraint_result.warnings,
+        "debate_log": orch_result.debate_log,
+        "mode": orch_result.mode,
     }
 
     db.add(PlanVersion(
@@ -166,6 +201,28 @@ async def _load_adaptive_context(user_id: str, db: AsyncSession) -> str:
             direction = "over" if bias > 0 else "under"
             lines.append(f"- Historically {direction}estimates '{w.key}' tasks by {abs(bias):.0f}%")
     return "\n".join(lines) if lines else "Insufficient historical data for adjustments."
+
+
+async def _load_completed_tasks(plan_id: str, current_version: int, db: AsyncSession) -> list[dict]:
+    """Returns completed tasks from the current version to pass as context to the planner."""
+    result = await db.execute(
+        select(Task).where(
+            Task.plan_id == uuid.UUID(plan_id),
+            Task.version == current_version,
+            Task.status.in_(["completed", "in_progress"]),
+        )
+    )
+    tasks = result.scalars().all()
+    return [
+        {
+            "name": t.name,
+            "category": t.category,
+            "estimated_hours": t.estimated_hours,
+            "actual_hours": t.actual_hours,
+            "status": t.status,
+        }
+        for t in tasks
+    ]
 
 
 async def _get_weights(user_id: str, db: AsyncSession) -> list[AdaptiveWeight]:

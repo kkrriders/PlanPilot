@@ -13,6 +13,7 @@ from src.models.execution import ExecutionLog, Checkpoint
 from src.schemas.execution import LogEventCreate, ExecutionLogOut, CheckpointCreate, CheckpointOut
 from src.services.execution.tracker import log_event, get_timeline
 from src.services.compliance.checker import run_compliance_checks, split_violations
+from src.services.learning.adaptive_weights import update_weights_after_completion
 
 router = APIRouter(prefix="/plans/{plan_id}/execution", tags=["execution"])
 
@@ -74,6 +75,11 @@ async def log_task_event(
         actual_hours=body.actual_hours,
     )
     await db.commit()
+
+    # Update adaptive weights whenever a task is completed with actual hours
+    if body.new_status == "completed" and body.actual_hours:
+        await update_weights_after_completion(str(plan_id), db)
+
     return log
 
 

@@ -196,6 +196,31 @@ async def get_task_history(
     return [{"version": v, "tasks": grouped[v]} for v in sorted(grouped.keys(), reverse=True)]
 
 
+@router.get("/{plan_id}/reasoning")
+async def get_plan_reasoning(
+    plan_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns the debate log and reasoning from the latest plan version."""
+    plan = await _get_plan_or_404(plan_id, current_user.id, db)
+    result = await db.execute(
+        select(PlanVersion)
+        .where(PlanVersion.plan_id == plan_id, PlanVersion.version == plan.current_version)
+    )
+    version = result.scalar_one_or_none()
+    if not version or not version.snapshot:
+        return {"debate_log": [], "mode": "accurate", "planner_reasoning": ""}
+    snap = version.snapshot
+    return {
+        "debate_log": snap.get("debate_log", []),
+        "mode": snap.get("mode", "accurate"),
+        "planner_reasoning": snap.get("planner_reasoning", ""),
+        "iterations_used": snap.get("iterations_used", 1),
+        "critic_score": snap.get("critic_score", 0),
+    }
+
+
 @router.get("/{plan_id}/dag", response_model=DagOut)
 async def get_dag(
     plan_id: uuid.UUID,

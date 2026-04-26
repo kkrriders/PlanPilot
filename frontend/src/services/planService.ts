@@ -15,13 +15,36 @@ export const planService = {
 
   getVersions: (id: string) => api.get<PlanVersion[]>(`/api/v1/plans/${id}/versions`).then(r => r.data),
 
-  generate: (id: string) => api.post<Plan>(`/api/v1/plans/${id}/generate`).then(r => r.data),
+  generate: (id: string, mode: 'fast' | 'accurate' | 'debate' = 'accurate') =>
+    api.post<Plan>(`/api/v1/plans/${id}/generate?mode=${mode}`).then(r => r.data),
 
   update: (id: string, data: Partial<Plan>) => api.patch<Plan>(`/api/v1/plans/${id}`, data).then(r => r.data),
 
   delete: (id: string) => api.delete(`/api/v1/plans/${id}`),
 
   getHistory: (id: string) => api.get<VersionHistory[]>(`/api/v1/plans/${id}/history`).then(r => r.data),
+
+  getReasoning: (id: string) => api.get<PlanReasoning>(`/api/v1/plans/${id}/reasoning`).then(r => r.data),
+}
+
+export interface DebateEntry {
+  iteration: number
+  verdict: 'accept' | 'revise'
+  risk_score: number
+  critic_score: number
+  planner_reasoning: string
+  risk_factors: string[]
+  risk_challenges: string[]
+  critic_issues: string[]
+  critic_strengths: string[]
+}
+
+export interface PlanReasoning {
+  debate_log: DebateEntry[]
+  mode: string
+  planner_reasoning: string
+  iterations_used: number
+  critic_score: number
 }
 
 export interface VersionHistory {

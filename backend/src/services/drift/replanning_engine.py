@@ -96,7 +96,16 @@ async def generate_replan_preview(plan_id: str, db: AsyncSession) -> dict:
     return {
         "added": [{"name": t.name, "estimated_hours": t.estimated_hours, "category": t.category} for t in added],
         "removed": [{"name": t.name, "id": str(t.id)} for t in removed],
-        "modified": [{"name": t.name, "new_estimated_hours": t.estimated_hours} for t in modified],
+        "modified": [
+            {
+                "name": t.name,
+                "old_estimated_hours": next(
+                    (r.estimated_hours for r in remaining_tasks if r.name == t.name), None
+                ),
+                "new_estimated_hours": t.estimated_hours,
+            }
+            for t in modified
+        ],
         "new_critical_path": [t.name for t in scheduled_new if t.id in new_critical_path_ids],
         "new_risk_score": round(float(risk_result.output.get("risk_score", 0.5)), 3),
         "new_confidence": round(replan_result.confidence, 3),

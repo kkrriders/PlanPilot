@@ -13,7 +13,7 @@ _USER = """Break down the following project goal into a detailed task list.
 
 GOAL: {goal}
 
-CONSTRAINTS:
+{completed_section}CONSTRAINTS:
 - Deadline: {deadline_days} days
 - Team size: {team_size} people
 - Budget: ${budget_usd}
@@ -124,8 +124,22 @@ class PlannerAgent(BaseAgent):
 
         limits = _compute_hard_limits(c)
 
+        if memory.completed_tasks:
+            lines = [
+                f"- {t['name']} ({t.get('category', '?')}, {t.get('estimated_hours', '?')}h) ✓"
+                for t in memory.completed_tasks
+            ]
+            completed_section = (
+                "ALREADY COMPLETED TASKS (these are DONE — do NOT include them in your output):\n"
+                + "\n".join(lines)
+                + "\n\nGenerate ONLY the remaining incomplete tasks needed to reach the goal.\n\n"
+            )
+        else:
+            completed_section = ""
+
         return _USER.format(
             goal=memory.goal,
+            completed_section=completed_section,
             deadline_days=limits["deadline_days"],
             team_size=limits["team_size"],
             budget_usd=c.get("budget_usd", "not specified"),

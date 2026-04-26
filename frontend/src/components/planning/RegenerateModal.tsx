@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { X, RefreshCw } from 'lucide-react'
+import { X, RefreshCw, Zap, Target, Swords } from 'lucide-react'
 import { planService } from '@/services/planService'
 import type { Plan } from '@/types/plan'
 
@@ -9,6 +9,29 @@ interface Props {
   onClose: () => void
   onRegenerated: () => void
 }
+
+type Mode = 'fast' | 'accurate' | 'debate'
+
+const MODES: { value: Mode; label: string; desc: string; icon: React.ReactNode }[] = [
+  {
+    value: 'fast',
+    label: 'Fast',
+    desc: '1 pass — quick plan, no revision loop',
+    icon: <Zap size={13} className="text-yellow-400" />,
+  },
+  {
+    value: 'accurate',
+    label: 'Accurate',
+    desc: '3 passes — risk + critic review each iteration',
+    icon: <Target size={13} className="text-blue-400" />,
+  },
+  {
+    value: 'debate',
+    label: 'Debate',
+    desc: '3 passes — stricter thresholds, harder to accept',
+    icon: <Swords size={13} className="text-purple-400" />,
+  },
+]
 
 const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500'
 
@@ -20,6 +43,7 @@ export default function RegenerateModal({ plan, onClose, onRegenerated }: Props)
   const [budget, setBudget] = useState(String(c.budget_usd ?? ''))
   const [techStack, setTechStack] = useState((c.tech_stack ?? []).join(', '))
   const [notes, setNotes] = useState(c.notes ?? '')
+  const [mode, setMode] = useState<Mode>('accurate')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -28,7 +52,6 @@ export default function RegenerateModal({ plan, onClose, onRegenerated }: Props)
     setError('')
     setLoading(true)
     try {
-      // Update constraints
       await planService.update(plan.id, {
         goal,
         constraints: {
@@ -39,8 +62,7 @@ export default function RegenerateModal({ plan, onClose, onRegenerated }: Props)
           notes: notes || undefined,
         },
       } as any)
-      // Trigger new generation
-      await planService.generate(plan.id)
+      await planService.generate(plan.id, mode)
       onRegenerated()
       onClose()
     } catch (err: any) {
@@ -99,6 +121,30 @@ export default function RegenerateModal({ plan, onClose, onRegenerated }: Props)
           <div>
             <label className="block text-xs text-gray-400 mb-1">Notes</label>
             <textarea value={notes} onChange={e => setNotes(e.target.value)} className={`${inputCls} h-16 resize-none`} />
+          </div>
+
+          {/* Mode selector */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-2">Planning Mode</label>
+            <div className="grid grid-cols-3 gap-2">
+              {MODES.map(m => (
+                <button
+                  key={m.value}
+                  type="button"
+                  onClick={() => setMode(m.value)}
+                  className={`flex flex-col gap-1 p-3 rounded-lg border text-left transition-colors ${
+                    mode === m.value
+                      ? 'border-blue-500 bg-blue-950/40'
+                      : 'border-gray-700 bg-gray-800 hover:border-gray-500'
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-white">
+                    {m.icon} {m.label}
+                  </span>
+                  <span className="text-[10px] text-gray-400 leading-snug">{m.desc}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="flex gap-3 pt-1">

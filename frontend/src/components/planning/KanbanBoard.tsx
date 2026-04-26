@@ -79,8 +79,8 @@ export default function KanbanBoard({ dag, planId, onTaskUpdated }: Props) {
   const byStatus = Object.fromEntries(COLUMNS.map(c => [c.id, [] as typeof dag.nodes]))
   filteredNodes.forEach(node => {
     const status = node.data.status
+    if (status === 'skipped') return  // hidden — superseded by replanning
     if (byStatus[status]) byStatus[status].push(node)
-    else if (status === 'skipped') byStatus['pending'].push(node)
   })
 
   // Only show columns that have tasks or are core statuses

@@ -14,7 +14,7 @@ Modes:
 """
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from src.agents.shared_memory import SharedMemory
@@ -45,6 +45,7 @@ class OrchestratorResult:
     iterations_used: int
     planner_reasoning: str
     mode: str = "accurate"
+    debate_log: list[dict] = field(default_factory=list)
 
 
 class MultiAgentOrchestrator:
@@ -64,6 +65,7 @@ class MultiAgentOrchestrator:
         constraints: dict,
         adaptive_context: str = "",
         team_context: str = "",
+        completed_tasks: list[dict] | None = None,
     ) -> OrchestratorResult:
         memory = SharedMemory(
             plan_id=plan_id,
@@ -71,11 +73,13 @@ class MultiAgentOrchestrator:
             constraints=constraints,
             adaptive_context=adaptive_context,
             team_context=team_context,
+            completed_tasks=completed_tasks or [],
         )
 
         last_good_plan: AgentResult | None = None
         risk_result: AgentResult | None = None
         critic_result: AgentResult | None = None
+        debate_log: list[dict] = []
 
         for iteration in range(self.max_iterations):
             memory.iteration = iteration
@@ -102,6 +106,18 @@ class MultiAgentOrchestrator:
             critic_score = float(critic_result.output.get("score", 0.0))
             verdict = critic_result.output.get("verdict", "revise")
 
+            debate_log.append({
+                "iteration": iteration + 1,
+                "verdict": verdict,
+                "risk_score": round(risk_score, 3),
+                "critic_score": round(critic_score, 1),
+                "planner_reasoning": plan_result.reasoning,
+                "risk_factors": risk_result.output.get("risk_factors", []),
+                "risk_challenges": risk_result.output.get("challenges", []),
+                "critic_issues": critic_result.output.get("issues", []),
+                "critic_strengths": critic_result.output.get("strengths", []),
+            })
+
             logger.info(
                 "Iteration %d result: risk=%.2f critic=%.1f/10 verdict=%s",
                 iteration + 1, risk_score, critic_score, verdict,
@@ -127,4 +143,5 @@ class MultiAgentOrchestrator:
             iterations_used=memory.iteration + 1,
             planner_reasoning=last_good_plan.reasoning if last_good_plan else "",
             mode=self.mode,
+            debate_log=debate_log,
         )

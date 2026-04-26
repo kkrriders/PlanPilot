@@ -1,5 +1,5 @@
 import type { ReplanPreview } from '../../types/execution'
-import { Plus, Trash2, Edit2, X } from 'lucide-react'
+import { Plus, Trash2, Edit2, X, AlertTriangle } from 'lucide-react'
 
 interface Props {
   preview: ReplanPreview
@@ -9,6 +9,8 @@ interface Props {
 }
 
 export default function ReplanningModal({ preview, onConfirm, onCancel, loading }: Props) {
+  const driftCause = preview.drift_analysis?.root_cause as string | undefined
+
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
       <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl">
@@ -34,6 +36,17 @@ export default function ReplanningModal({ preview, onConfirm, onCancel, loading 
             </div>
           </div>
 
+          {/* Drift cause — shown when drift analysis provides a root cause */}
+          {driftCause && (
+            <div className="bg-yellow-900/20 border border-yellow-700/40 rounded-lg p-3 flex gap-2">
+              <AlertTriangle size={14} className="text-yellow-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-medium text-yellow-300 mb-0.5">Drift Root Cause</p>
+                <p className="text-xs text-yellow-200/80">{driftCause}</p>
+              </div>
+            </div>
+          )}
+
           {/* Reasoning */}
           {preview.reasoning && (
             <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-3 text-sm text-blue-200">
@@ -48,7 +61,7 @@ export default function ReplanningModal({ preview, onConfirm, onCancel, loading 
               {preview.added.map((t, i) => (
                 <Item key={i} icon={<Plus size={14} className="text-green-400" />}>
                   <span className="font-medium">{t.name}</span>
-                  <span className="text-gray-400 ml-2">{t.estimated_hours}h · {t.category}</span>
+                  <span className="text-gray-400 ml-2">{t.estimated_hours}h{t.category ? ` · ${t.category}` : ''}</span>
                 </Item>
               ))}
             </Section>
@@ -65,15 +78,33 @@ export default function ReplanningModal({ preview, onConfirm, onCancel, loading 
             </Section>
           )}
 
-          {/* Modified tasks */}
+          {/* Modified tasks — shows old → new hours diff */}
           {preview.modified.length > 0 && (
             <Section title={`Modified (${preview.modified.length})`} color="text-yellow-400">
               {preview.modified.map((t, i) => (
                 <Item key={i} icon={<Edit2 size={14} className="text-yellow-400" />}>
                   <span className="font-medium">{t.name}</span>
-                  <span className="text-gray-400 ml-2">→ {t.new_estimated_hours}h</span>
+                  <span className="text-gray-400 ml-2">
+                    {t.old_estimated_hours != null
+                      ? <><span className="line-through text-gray-500">{t.old_estimated_hours}h</span> → <span className="text-yellow-300">{t.new_estimated_hours}h</span></>
+                      : <>→ {t.new_estimated_hours}h</>
+                    }
+                  </span>
                 </Item>
               ))}
+            </Section>
+          )}
+
+          {/* New critical path summary */}
+          {preview.new_critical_path.length > 0 && (
+            <Section title="New Critical Path" color="text-red-400">
+              <div className="flex flex-wrap gap-1 mt-1">
+                {preview.new_critical_path.map((name, i) => (
+                  <span key={i} className="text-xs bg-red-900/40 border border-red-700/40 text-red-300 px-2 py-0.5 rounded">
+                    {name}
+                  </span>
+                ))}
+              </div>
             </Section>
           )}
         </div>

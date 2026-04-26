@@ -15,11 +15,23 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Auto-refresh on 401 (SSR-safe, re-entrancy guarded)
+// Auto-refresh on 401, toast on 429 (SSR-safe, re-entrancy guarded)
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
-    if (typeof window !== 'undefined' && error.response?.status === 401 && !isRefreshing) {
+    if (typeof window === 'undefined') return Promise.reject(error)
+
+    if (error.response?.status === 429) {
+      // Lazy import avoids circular dep — toastStore imports nothing from api
+      const { useToastStore } = await import('@/store/toastStore')
+      useToastStore.getState().toast('Too many requests — please wait a moment', 'warning')
+      return Promise.reject(error)
+    }
+
+    const url = error.config?.url ?? ''
+    const isAuthEndpoint = url.includes('/auth/login') || url.includes('/auth/register') || url.includes('/auth/refresh')
+
+    if (error.response?.status === 401 && !isRefreshing && !isAuthEndpoint) {
       const refresh = localStorage.getItem('refresh_token')
       if (refresh) {
         isRefreshing = true

@@ -93,13 +93,16 @@ function layoutNodes(nodes: Node[], edges: Edge[]): Node[] {
   const depths: Record<string, number> = {}
   const adjacency: Record<string, string[]> = {}
 
+  const nodeIds = new Set(nodes.map(n => n.id))
+  const validEdges = edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
+
   nodes.forEach(n => { adjacency[n.id] = []; depths[n.id] = 0 })
-  edges.forEach(e => adjacency[e.source].push(e.target))
+  validEdges.forEach(e => adjacency[e.source].push(e.target))
 
   // BFS from root nodes
   const inDegree: Record<string, number> = {}
   nodes.forEach(n => { inDegree[n.id] = 0 })
-  edges.forEach(e => { inDegree[e.target] = (inDegree[e.target] || 0) + 1 })
+  validEdges.forEach(e => { inDegree[e.target] = (inDegree[e.target] || 0) + 1 })
 
   const queue = nodes.filter(n => inDegree[n.id] === 0).map(n => n.id)
   while (queue.length) {

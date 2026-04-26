@@ -13,13 +13,14 @@ import ExecutionTimeline from '@/components/execution/ExecutionTimeline'
 import DriftAlertBanner from '@/components/execution/DriftAlertBanner'
 import ReplanningModal from '@/components/execution/ReplanningModal'
 import DriftAnalyticsTab from '@/components/execution/DriftAnalyticsTab'
+import ComplianceTab from '@/components/execution/ComplianceTab'
 import { executionService } from '@/services/executionService'
 import { planService, type VersionHistory } from '@/services/planService'
-import { Activity, LayoutDashboard, BarChart3, RefreshCw, Users, RotateCcw, AlertCircle, Settings, Bot, History, GitFork, ChevronDown, ChevronRight, TriangleAlert, Download } from 'lucide-react'
+import { Activity, LayoutDashboard, BarChart3, RefreshCw, Users, RotateCcw, AlertCircle, Settings, Bot, History, GitFork, ChevronDown, ChevronRight, TriangleAlert, Download, ShieldAlert } from 'lucide-react'
 import AuthGuard from '@/components/shared/AuthGuard'
 import { useToastStore } from '@/store/toastStore'
 
-type Tab = 'board' | 'dag' | 'timeline' | 'drift' | 'team' | 'history'
+type Tab = 'board' | 'dag' | 'timeline' | 'drift' | 'compliance' | 'team' | 'history'
 
 interface BottleneckItem {
   task_id: string
@@ -76,7 +77,7 @@ function PlanDetailContent() {
     if (!planId) return
     setRetrying(true)
     try {
-      await planService.generate(planId)
+      await planService.generate(planId, 'accurate')
       await fetchPlan(planId)
       pollPlanStatus(planId, () => {
         fetchDag(planId)
@@ -258,6 +259,7 @@ function PlanDetailContent() {
           { id: 'timeline', label: 'Timeline', icon: Activity },
           { id: 'team', label: 'Team', icon: Users },
           { id: 'drift', label: 'Analytics', icon: BarChart3 },
+          { id: 'compliance', label: 'Compliance', icon: ShieldAlert },
           ...(history.length > 0 ? [{ id: 'history' as const, label: 'History', icon: History }] : []),
         ] as const).map(({ id, label, icon: Icon }) => (
           <button
@@ -369,6 +371,12 @@ function PlanDetailContent() {
 
       {tab === 'drift' && (
         <DriftAnalyticsTab planId={planId!} driftMetric={driftMetric} />
+      )}
+
+      {tab === 'compliance' && (
+        <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
+          <ComplianceTab planId={planId!} />
+        </div>
       )}
 
       {tab === 'history' && (

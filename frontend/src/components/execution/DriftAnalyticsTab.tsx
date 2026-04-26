@@ -6,7 +6,11 @@ import {
   ResponsiveContainer, ReferenceLine,
 } from 'recharts'
 import api from '../../services/api'
-import { Brain, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { executionService } from '../../services/executionService'
+import { planService } from '../../services/planService'
+import type { DriftEvent } from '../../types/execution'
+import type { DebateEntry } from '../../services/planService'
+import { Brain, TrendingUp, TrendingDown, Minus, Clock, RotateCcw, CheckCircle, Swords, ChevronDown, ChevronRight, ShieldAlert, MessageSquare, ThumbsUp } from 'lucide-react'
 
 interface AdaptiveWeight {
   key: string
@@ -33,6 +37,10 @@ export default function DriftAnalyticsTab({ planId, driftMetric }: Props) {
   const [velocity, setVelocity] = useState<{ date: string; tasks_completed: number }[]>([])
   const [accuracy, setAccuracy] = useState<{ name: string; estimated_hours: number; actual_hours: number }[]>([])
   const [weights, setWeights] = useState<AdaptiveWeight[]>([])
+  const [driftEvents, setDriftEvents] = useState<DriftEvent[]>([])
+  const [debateLog, setDebateLog] = useState<DebateEntry[]>([])
+  const [planMode, setPlanMode] = useState('')
+  const [expandedIteration, setExpandedIteration] = useState<number | null>(null)
   const [loadingCharts, setLoadingCharts] = useState(true)
 
   useEffect(() => {
@@ -59,6 +67,10 @@ export default function DriftAnalyticsTab({ planId, driftMetric }: Props) {
       }
     }
     load()
+    executionService.getDriftEvents(planId).then(setDriftEvents).catch(() => {})
+    planService.getReasoning(planId)
+      .then(r => { setDebateLog(r.debate_log ?? []); setPlanMode(r.mode ?? '') })
+      .catch(() => {})
   }, [planId])
 
   const activeWeights = weights.filter(w => w.active && w.key !== 'effort_estimation_bias')
@@ -217,6 +229,142 @@ export default function DriftAnalyticsTab({ planId, driftMetric }: Props) {
           </div>
         )}
       </div>
+
+      {/* Planning debate log */}
+      {debateLog.length > 0 && (
+        <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Swords size={15} className="text-purple-400" />
+            <h3 className="text-sm font-semibold text-white">Planning Debate</h3>
+            {planMode && (
+              <span className="text-[10px] bg-purple-900/40 border border-purple-700/40 text-purple-300 px-2 py-0.5 rounded capitalize ml-1">
+                {planMode} mode · {debateLog.length} iteration{debateLog.length !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+          <div className="space-y-2">
+            {debateLog.map(entry => {
+              const isOpen = expandedIteration === entry.iteration
+              const accepted = entry.verdict === 'accept'
+              return (
+                <div key={entry.iteration} className="border border-gray-700/60 rounded-lg overflow-hidden">
+                  <button
+                    onClick={() => setExpandedIteration(isOpen ? null : entry.iteration)}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-800/60 transition-colors"
+                  >
+                    <span className={`text-xs font-semibold flex-shrink-0 ${accepted ? 'text-green-400' : 'text-yellow-400'}`}>
+                      Pass {entry.iteration}
+                    </span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border flex-shrink-0 ${accepted ? 'bg-green-900/40 border-green-700/40 text-green-300' : 'bg-yellow-900/30 border-yellow-700/40 text-yellow-300'}`}>
+                      {accepted ? 'accepted' : 'revise'}
+                    </span>
+                    <div className="flex items-center gap-3 ml-2 text-xs text-gray-500">
+                      <span>Risk {(entry.risk_score * 100).toFixed(0)}%</span>
+                      <span>Critic {entry.critic_score}/10</span>
+                    </div>
+                    <div className="ml-auto">
+                      {isOpen ? <ChevronDown size={13} className="text-gray-500" /> : <ChevronRight size={13} className="text-gray-500" />}
+                    </div>
+                  </button>
+
+                  {isOpen && (
+                    <div className="px-4 pb-4 space-y-3 border-t border-gray-700/60 pt-3">
+                      {entry.planner_reasoning && (
+                        <div>
+                          <p className="text-[11px] font-medium text-gray-400 mb-1">Planner reasoning</p>
+                          <p className="text-xs text-gray-300">{entry.planner_reasoning}</p>
+                        </div>
+                      )}
+                      {entry.risk_challenges.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <ShieldAlert size={11} className="text-red-400" />
+                            <p className="text-[11px] font-medium text-red-300">Risk agent challenges</p>
+                          </div>
+                          <ul className="space-y-1">
+                            {entry.risk_challenges.map((c, i) => (
+                              <li key={i} className="text-xs text-gray-400 flex gap-2">
+                                <span className="text-red-500 flex-shrink-0">·</span>{c}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {entry.critic_issues.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <MessageSquare size={11} className="text-yellow-400" />
+                            <p className="text-[11px] font-medium text-yellow-300">Critic issues</p>
+                          </div>
+                          <ul className="space-y-1">
+                            {entry.critic_issues.map((c, i) => (
+                              <li key={i} className="text-xs text-gray-400 flex gap-2">
+                                <span className="text-yellow-500 flex-shrink-0">·</span>{c}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {entry.critic_strengths.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <ThumbsUp size={11} className="text-green-400" />
+                            <p className="text-[11px] font-medium text-green-300">Strengths noted</p>
+                          </div>
+                          <ul className="space-y-1">
+                            {entry.critic_strengths.map((s, i) => (
+                              <li key={i} className="text-xs text-gray-400 flex gap-2">
+                                <span className="text-green-500 flex-shrink-0">·</span>{s}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Drift event log */}
+      {driftEvents.length > 0 && (
+        <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Clock size={15} className="text-gray-400" />
+            <h3 className="text-sm font-semibold text-white">Drift Event Log</h3>
+            <span className="text-xs text-gray-500 ml-1">— {driftEvents.length} event{driftEvents.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div className="space-y-2">
+            {driftEvents.map(ev => (
+              <div key={ev.id} className="flex items-start gap-3 py-2 border-b border-gray-800 last:border-0">
+                <div className="flex-shrink-0 mt-0.5">
+                  {ev.was_replanned
+                    ? <RotateCcw size={13} className="text-blue-400" />
+                    : <CheckCircle size={13} className="text-gray-600" />
+                  }
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-medium text-white capitalize">{ev.trigger_type.replace(/_/g, ' ')}</span>
+                    {ev.was_replanned && (
+                      <span className="text-[10px] bg-blue-900/50 border border-blue-700/40 text-blue-300 px-1.5 py-0.5 rounded">replanned</span>
+                    )}
+                  </div>
+                  {ev.description && (
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">{ev.description}</p>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-600 flex-shrink-0 ml-2">
+                  {new Date(ev.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {!loadingCharts && accuracy.length === 0 && velocity.length === 0 && (
         <div className="text-center py-6 text-gray-500 text-sm">
