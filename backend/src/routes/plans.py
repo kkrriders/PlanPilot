@@ -294,6 +294,76 @@ async def get_plan_reasoning(
     }
 
 
+@router.post("/{plan_id}/report")
+async def generate_stakeholder_report(
+    plan_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a prose stakeholder report using LLM."""
+    from src.services.llm.groq_provider import sonnet
+
+    plan = await _get_plan_or_404(plan_id, current_user.id, db)
+
+    task_result = await db.execute(
+        select(Task).where(Task.plan_id == plan_id, Task.version == plan.current_version)
+    )
+    tasks = task_result.scalars().all()
+
+    total = len(tasks)
+    completed = sum(1 for t in tasks if t.status == "completed")
+    in_progress = sum(1 for t in tasks if t.status == "in_progress")
+    blocked = sum(1 for t in tasks if t.status == "blocked")
+    pending = sum(1 for t in tasks if t.status == "pending")
+    estimated_hours = sum(t.estimated_hours or 0 for t in tasks)
+    actual_hours = sum(t.actual_hours or 0 for t in tasks if t.actual_hours)
+    critical_names = [t.name for t in tasks if t.is_on_critical_path]
+    blocked_names = [t.name for t in tasks if t.status == "blocked"]
+
+    prompt = f"""Generate a stakeholder status report for the following project.
+
+PROJECT: {plan.title}
+GOAL: {plan.goal}
+STATUS: {plan.status.upper()}
+
+TASK METRICS:
+- Total tasks: {total}
+- Completed: {completed} ({round(completed / total * 100) if total else 0}%)
+- In Progress: {in_progress}
+- Blocked: {blocked}
+- Pending: {pending}
+
+HOURS:
+- Estimated total: {estimated_hours:.1f}h
+- Actual logged: {actual_hours:.1f}h
+
+RISK & CONFIDENCE:
+- Risk score: {(plan.risk_score or 0) * 100:.0f}%
+- AI confidence: {(plan.confidence or 0) * 100:.0f}%
+
+CRITICAL PATH TASKS:
+{chr(10).join(f"- {t}" for t in critical_names) if critical_names else "- None identified"}
+
+BLOCKED TASKS:
+{chr(10).join(f"- {t}" for t in blocked_names) if blocked_names else "- None currently blocked"}
+
+Write a professional 4-section report using markdown headers:
+## Executive Summary
+## Progress Overview
+## Risks & Concerns
+## Recommended Next Steps
+
+Be concise (under 400 words), honest about risks, and do not invent data not provided above."""
+
+    system = "You are a senior project manager writing a concise status report for stakeholders. Be professional and honest."
+    try:
+        report_text = await sonnet.complete(system, prompt, max_tokens=800)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Report generation failed: {exc}")
+
+    return {"report": report_text, "plan_id": str(plan_id)}
+
+
 @router.get("/{plan_id}/dag", response_model=DagOut)
 async def get_dag(
     plan_id: uuid.UUID,
@@ -319,6 +389,10 @@ async def get_dag(
                 "is_on_critical_path": t.is_on_critical_path,
                 "description": t.description,
                 "assigned_to": t.assigned_to,
+                "hours_pessimistic": (t.metadata_ or {}).get("hours_pessimistic"),
+                "is_external_block": (t.metadata_ or {}).get("is_external_block", False),
+                "external_block_reason": (t.metadata_ or {}).get("external_block_reason"),
+                "rating": (t.metadata_ or {}).get("rating"),
             },
             "type": "taskNode",
         }

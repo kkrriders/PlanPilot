@@ -11,6 +11,7 @@ from src.models.task import Task, TaskDependency
 from src.schemas.task import TaskCreate, TaskUpdate, TaskOut, DependencyCreate
 from src.utils.graph import has_cycle
 from src.workers.drift_tasks import compute_drift_single
+from src.models.learning import FeedbackLog
 
 _DRIFT_TRIGGER_STATUSES = {"completed", "failed", "blocked"}
 
@@ -100,6 +101,40 @@ async def delete_task(
     else:
         await db.delete(task)
     await db.commit()
+
+
+@router.post("/{task_id}/feedback", status_code=201)
+async def rate_task(
+    plan_id: uuid.UUID,
+    task_id: uuid.UUID,
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Store user rating (good/bad) on a task — feeds into future planning prompts."""
+    rating = body.get("rating")
+    if rating not in ("good", "bad"):
+        raise HTTPException(status_code=400, detail="rating must be 'good' or 'bad'")
+
+    await _check_plan_ownership(plan_id, current_user.id, db)
+    task = await _get_task_or_404(task_id, plan_id, db)
+
+    # Store rating in task metadata for DAG display
+    meta = dict(task.metadata_ or {})
+    meta["rating"] = rating
+    task.metadata_ = meta
+
+    # Log to FeedbackLog for prompt context on future plans
+    db.add(FeedbackLog(
+        plan_id=plan_id,
+        task_id=task_id,
+        field="rating",
+        old_value=None,
+        new_value=rating,
+        source="user",
+    ))
+    await db.commit()
+    return {"task_id": str(task_id), "rating": rating}
 
 
 @router.post("/{task_id}/dependencies", status_code=201)

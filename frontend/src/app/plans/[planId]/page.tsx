@@ -16,7 +16,7 @@ import DriftAnalyticsTab from '@/components/execution/DriftAnalyticsTab'
 import ComplianceTab from '@/components/execution/ComplianceTab'
 import { executionService } from '@/services/executionService'
 import { planService, type VersionHistory } from '@/services/planService'
-import { Activity, LayoutDashboard, BarChart3, RefreshCw, Users, RotateCcw, AlertCircle, Settings, Bot, History, GitFork, ChevronDown, ChevronRight, TriangleAlert, Download, ShieldAlert, CheckCircle2 } from 'lucide-react'
+import { Activity, LayoutDashboard, BarChart3, RefreshCw, Users, RotateCcw, AlertCircle, Settings, Bot, History, GitFork, ChevronDown, ChevronRight, TriangleAlert, Download, ShieldAlert, CheckCircle2, FileText, Copy, Check } from 'lucide-react'
 import AuthGuard from '@/components/shared/AuthGuard'
 import { useToastStore } from '@/store/toastStore'
 
@@ -46,6 +46,10 @@ function PlanDetailContent() {
   const [bottlenecks, setBottlenecks] = useState<BottleneckItem[]>([])
   const [showBottlenecks, setShowBottlenecks] = useState(true)
   const [completing, setCompleting] = useState(false)
+  const [showReport, setShowReport] = useState(false)
+  const [reportText, setReportText] = useState('')
+  const [generatingReport, setGeneratingReport] = useState(false)
+  const [reportCopied, setReportCopied] = useState(false)
   const { toast } = useToastStore()
 
   const handleCompletePlan = async () => {
@@ -60,6 +64,28 @@ function PlanDetailContent() {
     } finally {
       setCompleting(false)
     }
+  }
+
+  const handleGenerateReport = async () => {
+    if (!planId) return
+    setGeneratingReport(true)
+    setShowReport(true)
+    setReportText('')
+    try {
+      const data = await planService.generateReport(planId)
+      setReportText(data.report)
+    } catch {
+      toast('Failed to generate report', 'error')
+      setShowReport(false)
+    } finally {
+      setGeneratingReport(false)
+    }
+  }
+
+  const handleCopyReport = async () => {
+    await navigator.clipboard.writeText(reportText)
+    setReportCopied(true)
+    setTimeout(() => setReportCopied(false), 2000)
   }
 
   const handleExportCsv = () => {
@@ -202,6 +228,13 @@ function PlanDetailContent() {
                   Export CSV
                 </button>
               )}
+              <button
+                onClick={handleGenerateReport}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 hover:text-white rounded-lg transition-colors"
+              >
+                <FileText size={12} />
+                Report
+              </button>
               <button
                 onClick={() => setShowRegenerate(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 hover:text-white rounded-lg transition-colors"
@@ -485,6 +518,56 @@ function PlanDetailContent() {
           onCancel={clearReplanPreview}
           loading={applyingReplan}
         />
+      )}
+
+      {showReport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowReport(false)}>
+          <div
+            className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700">
+              <div className="flex items-center gap-2">
+                <FileText size={15} className="text-blue-400" />
+                <h2 className="font-semibold text-white text-sm">Stakeholder Report</h2>
+                {currentPlan && <span className="text-xs text-gray-500">{currentPlan.title}</span>}
+              </div>
+              <div className="flex items-center gap-2">
+                {reportText && (
+                  <button
+                    onClick={handleCopyReport}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 hover:text-white rounded-lg transition-colors"
+                  >
+                    {reportCopied ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
+                    {reportCopied ? 'Copied!' : 'Copy'}
+                  </button>
+                )}
+                <button onClick={() => setShowReport(false)} className="text-gray-500 hover:text-white p-1">
+                  <RotateCcw size={14} className="rotate-45" />
+                </button>
+              </div>
+            </div>
+            <div className="overflow-y-auto flex-1 px-5 py-4">
+              {generatingReport ? (
+                <div className="flex flex-col items-center justify-center gap-3 py-12">
+                  <RefreshCw size={20} className="text-blue-400 animate-spin" />
+                  <p className="text-gray-400 text-sm">Generating stakeholder report...</p>
+                </div>
+              ) : (
+                <div className="prose prose-sm prose-invert max-w-none">
+                  {reportText.split('\n').map((line, i) => {
+                    if (line.startsWith('## ')) return <h2 key={i} className="text-white font-semibold text-base mt-5 mb-2 first:mt-0">{line.slice(3)}</h2>
+                    if (line.startsWith('# ')) return <h1 key={i} className="text-white font-bold text-lg mt-4 mb-2">{line.slice(2)}</h1>
+                    if (line.startsWith('- ')) return <li key={i} className="text-gray-300 text-sm ml-3 list-disc">{line.slice(2)}</li>
+                    if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="font-semibold text-white text-sm">{line.slice(2, -2)}</p>
+                    if (line.trim() === '') return <div key={i} className="h-2" />
+                    return <p key={i} className="text-gray-300 text-sm leading-relaxed">{line}</p>
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

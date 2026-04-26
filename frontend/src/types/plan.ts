@@ -43,10 +43,14 @@ export interface DagNode {
     category?: string
     status: string
     estimated_hours?: number
+    hours_pessimistic?: number | null
     priority: number
     is_on_critical_path: boolean
     description?: string
     assigned_to?: string | null
+    rating?: 'good' | 'bad' | null
+    is_external_block?: boolean
+    external_block_reason?: string | null
   }
   position?: { x: number; y: number }
 }

@@ -207,18 +207,26 @@ export default function DriftAnalyticsTab({ planId, driftMetric }: Props) {
               const Icon = Math.abs(bias) < 5 ? Minus : over ? TrendingUp : TrendingDown
               const color = Math.abs(bias) < 5 ? 'text-gray-400' : over ? 'text-amber-400' : 'text-emerald-400'
               const confidence = Math.round(w.confidence * 100)
+              const isIndustry = w.sample_count === 0
               return (
                 <div key={w.key} className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
                   <div className="flex items-center gap-2">
                     <Icon size={13} className={color} />
                     <span className="text-sm text-white capitalize">{category}</span>
                     <span className="text-xs text-gray-500">tasks</span>
+                    {isIndustry && (
+                      <span className="text-[10px] bg-blue-900/40 border border-blue-700/40 text-blue-300 px-1.5 py-0.5 rounded">
+                        industry avg
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 text-xs">
                     <span className={`font-medium ${color}`}>
                       {over ? '+' : ''}{bias.toFixed(0)}% vs estimate
                     </span>
-                    <span className="text-gray-600">{w.sample_count} samples · {confidence}% confidence</span>
+                    {!isIndustry && (
+                      <span className="text-gray-600">{w.sample_count} samples · {confidence}% confidence</span>
+                    )}
                   </div>
                 </div>
               )

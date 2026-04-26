@@ -12,7 +12,19 @@ from src.models.task import Task
 from src.models.learning import AdaptiveWeight, FeedbackLog
 
 EMA_ALPHA = 0.3  # weight for new observation in exponential moving average
-MIN_SAMPLES = 3  # minimum plans before weights activate
+MIN_SAMPLES = 3  # minimum observations before weights activate
+
+# Industry-average estimation ratios (actual/estimated) used as cold-start priors.
+# Sourced from published software project research (CHAOS Report, industry surveys).
+INDUSTRY_BENCHMARKS: dict[str, float] = {
+    "category_bias_dev":      1.35,  # developers underestimate by ~35%
+    "category_bias_test":     1.10,
+    "category_bias_research": 1.50,  # research tasks most underestimated
+    "category_bias_design":   1.15,
+    "category_bias_deploy":   1.40,
+    "category_bias_planning": 1.05,
+    "category_bias_review":   1.00,
+}
 
 
 async def update_weights_after_completion(plan_id: str, db: AsyncSession) -> None:
@@ -90,16 +102,33 @@ async def get_user_weights(user_id: uuid.UUID, db: AsyncSession) -> list[dict]:
         )
     )
     weights = result.scalars().all()
-    return [
+    user_keys = {w.key for w in weights}
+
+    rows = [
         {
             "key": w.key,
             "value": round(w.value, 3),
             "confidence": round(w.confidence, 3),
             "sample_count": w.sample_count,
             "active": w.sample_count >= MIN_SAMPLES,
+            "source": "user",
         }
         for w in weights
     ]
+
+    # Fill in industry benchmarks for categories the user hasn't yet learned
+    for key, value in INDUSTRY_BENCHMARKS.items():
+        if key not in user_keys:
+            rows.append({
+                "key": key,
+                "value": round(value, 3),
+                "confidence": 0.3,
+                "sample_count": 0,
+                "active": True,  # benchmarks always active as cold-start priors
+                "source": "industry",
+            })
+
+    return rows
 
 
 async def _update_weight(

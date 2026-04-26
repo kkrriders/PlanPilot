@@ -2,8 +2,9 @@
 import { useState, useMemo } from 'react'
 import type { DagData } from '../../types/plan'
 import TaskUpdateModal from '../execution/TaskUpdateModal'
-import { Clock, Zap, Flag, ShieldCheck, ShieldAlert, Filter, X, Download } from 'lucide-react'
+import { Clock, Zap, Flag, ShieldCheck, ShieldAlert, Filter, X, Download, ThumbsUp, ThumbsDown } from 'lucide-react'
 import clsx from 'clsx'
+import api from '../../services/api'
 
 const COLUMNS = [
   { id: 'pending',     label: 'Pending',     headerCls: 'border-gray-500',  countCls: 'bg-gray-700 text-gray-300' },
@@ -63,6 +64,23 @@ export default function KanbanBoard({ dag, planId, onTaskUpdated }: Props) {
   const [filterCategory, setFilterCategory] = useState<string>('')
   const [filterAssignee, setFilterAssignee] = useState<string>('')
   const [filterPriority, setFilterPriority] = useState<string>('')
+  const [ratings, setRatings] = useState<Record<string, 'good' | 'bad'>>(() =>
+    Object.fromEntries(
+      dag.nodes
+        .filter(n => n.data.rating === 'good' || n.data.rating === 'bad')
+        .map(n => [n.id, n.data.rating as 'good' | 'bad'])
+    )
+  )
+
+  const handleRate = async (taskId: string, rating: 'good' | 'bad') => {
+    const prev = ratings[taskId]
+    setRatings(r => ({ ...r, [taskId]: rating }))
+    try {
+      await api.post(`/api/v1/plans/${planId}/tasks/${taskId}/feedback`, { rating })
+    } catch {
+      setRatings(r => { const next = { ...r }; if (prev) next[taskId] = prev; else delete next[taskId]; return next })
+    }
+  }
 
   // Derive unique filter options from dag
   const categories = useMemo(() => [...new Set(dag.nodes.map(n => n.data.category).filter(Boolean))].sort(), [dag])
@@ -177,6 +195,8 @@ export default function KanbanBoard({ dag, planId, onTaskUpdated }: Props) {
                 <TaskCard
                   key={node.id}
                   node={node}
+                  currentRating={ratings[node.id]}
+                  onRate={(rating) => handleRate(node.id, rating)}
                   onClick={() => setSelectedTask({ id: node.id, data: node.data })}
                 />
               ))}
@@ -207,8 +227,13 @@ export default function KanbanBoard({ dag, planId, onTaskUpdated }: Props) {
   )
 }
 
-function TaskCard({ node, onClick }: { node: any; onClick: () => void }) {
-  const { label, category, status, estimated_hours, priority, is_on_critical_path, description, assigned_to } = node.data
+function TaskCard({ node, currentRating, onRate, onClick }: {
+  node: any
+  currentRating?: 'good' | 'bad'
+  onRate: (rating: 'good' | 'bad') => void
+  onClick: () => void
+}) {
+  const { label, category, status, estimated_hours, hours_pessimistic, priority, is_on_critical_path, description, assigned_to } = node.data
 
   const catCls = CATEGORY_COLORS[category] || 'bg-gray-800 text-gray-300'
   const priorityInfo = PRIORITY_LABELS[priority] || PRIORITY_LABELS[3]
@@ -260,9 +285,12 @@ function TaskCard({ node, onClick }: { node: any; onClick: () => void }) {
       <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-800">
         <div className="flex items-center gap-3">
           {estimated_hours && (
-            <span className="flex items-center gap-1 text-[11px] text-gray-500">
+            <span className="flex items-center gap-1 text-[11px] text-gray-500" title={hours_pessimistic ? `P80 estimate: ${hours_pessimistic}h` : undefined}>
               <Clock size={10} />
               {estimated_hours}h
+              {hours_pessimistic && hours_pessimistic > estimated_hours && (
+                <span className="text-gray-600">→{hours_pessimistic}h</span>
+              )}
             </span>
           )}
           <span className={clsx('flex items-center gap-1 text-[11px]', priorityInfo.cls)}>
@@ -285,6 +313,20 @@ function TaskCard({ node, onClick }: { node: any; onClick: () => void }) {
           {status === 'blocked' && (
             <ShieldAlert size={12} className="text-yellow-400" aria-label="Task is blocked" />
           )}
+          <button
+            onClick={e => { e.stopPropagation(); onRate('good') }}
+            title="Rate as well-estimated"
+            className={clsx('p-0.5 rounded transition-colors', currentRating === 'good' ? 'text-green-400' : 'text-gray-600 hover:text-green-400')}
+          >
+            <ThumbsUp size={10} />
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); onRate('bad') }}
+            title="Rate as poorly estimated"
+            className={clsx('p-0.5 rounded transition-colors', currentRating === 'bad' ? 'text-red-400' : 'text-gray-600 hover:text-red-400')}
+          >
+            <ThumbsDown size={10} />
+          </button>
           <span className="text-[10px] text-gray-600 group-hover:text-gray-400 transition-colors">
             Update →
           </span>

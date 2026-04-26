@@ -14,6 +14,8 @@ class LogEventCreate(BaseModel):
     new_status: TaskStatus | None = None
     evidence_url: str | None = None
     actual_hours: float | None = Field(None, ge=0, description="Actual hours spent; overrides auto-computed value")
+    is_external_block: bool = False
+    external_block_reason: str | None = None
 
 
 class ExecutionLogOut(BaseModel):

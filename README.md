@@ -1,4 +1,4 @@
-# PlanPilot
+﻿# PlanPilot
 
 > AI-powered project planning with multi-agent orchestration, drift detection, adaptive learning, and simulation.
 
@@ -40,19 +40,24 @@ You describe a goal, set constraints, and a multi-agent LLM pipeline decomposes 
 |---|---|
 | **Multi-Agent Planning** | PlannerAgent → RiskAgent + CriticAgent run in parallel per iteration; planner revises based on challenges before plan is accepted |
 | **Planning Modes** | Fast (1 pass), Accurate (3 passes, standard thresholds), Debate (3 passes, stricter acceptance criteria) |
-| **Planning Debate Log** | Per-iteration risk challenges, critic issues, and planner reasoning are stored and shown in the Analytics tab |
+| **Planning Debate Log** | Per-iteration risk challenges, critic issues, and planner reasoning stored in the version snapshot and shown in Analytics tab |
 | **DAG + Critical Path** | ReactFlow visualizes the dependency graph; CPM identifies the critical path (yellow ring on nodes) |
-| **Kanban Board** | Tasks as 4-column cards with filters by assignee, category, and priority |
+| **Kanban Board** | Tasks as 4-column cards with filters by assignee, category, and priority; thumbs up/down rating on every card |
+| **Confidence Intervals** | LLM emits a P80 `hours_pessimistic` alongside `estimated_hours`; shown on Kanban cards as "8h →12h" |
+| **Task Feedback Loop** | Good/bad ratings stored per task in FeedbackLog; poorly-rated patterns injected into future planning prompts |
+| **External Blockers** | Mark a blocked task as externally caused (vendor, approval, etc.) — these are excluded from drift overdue penalty |
 | **Gantt Timeline** | Chronological timeline view showing early/late start windows per task |
-| **Team Skill Assignment** | Team member skills are injected into the LLM prompt — tasks are auto-assigned |
+| **Team Skill Assignment** | Team member skills injected into the LLM prompt — tasks are auto-assigned by best fit |
 | **Bottleneck Detection** | Tasks blocking downstream work with overdue status surfaced above the board |
 | **Compliance Enforcement** | 5 rules prevent invalid task transitions; dedicated Compliance tab shows all flagged events |
 | **Drift Detection** | Measures schedule slippage and effort overrun; classifies severity (low → critical) |
+| **External Block Exemption** | Tasks marked as externally blocked are skipped in the overdue drift penalty calculation |
 | **Drift Event Log** | Full history of drift triggers and whether they resulted in a replan, shown in Analytics tab |
 | **Adaptive Replanning** | When drift is high/critical, AI regenerates only remaining tasks — completed work is preserved |
 | **Replan Preview** | Shows added/removed/modified tasks with old→new hour diff and AI-identified root cause before applying |
-| **Adaptive Learning** | Per-user estimation weights update automatically after each completed task with actual hours logged |
-| **Estimation Insights** | Dashboard and Analytics tab surface learned over/under-estimation patterns per task category |
+| **Adaptive Learning** | Per-user estimation weights updated via EMA after each completed task; industry benchmarks used as cold-start priors |
+| **Estimation Insights** | Dashboard and Analytics tab surface learned patterns; cold-start priors labelled "industry avg" |
+| **Stakeholder Report** | One-click LLM-generated 4-section prose report (summary, progress, risks, next steps) with copy-to-clipboard |
 | **Simulation Mode** | 4 scenarios with bot personalities simulate compressed project days to demo the full loop |
 | **Version History** | Old tasks preserved on regeneration; shown in History tab |
 | **Project History** | Completed plans archived to a dedicated `/history` page with outcome summaries |
@@ -128,19 +133,21 @@ You describe a goal, set constraints, and a multi-agent LLM pipeline decomposes 
 ```
 POST /plans/:id/generate?mode=accurate
   → Celery picks up task
-  → load adaptive weights + team context
+  → load adaptive weights + team context + user feedback patterns
   → load completed tasks from current version (preserved on regeneration)
   → Multi-Agent Orchestrator (up to 3 iterations):
       iteration N:
         PlannerAgent (llama-3.3-70b)
           → if N > 0: injects risk challenges + critic issues into prompt
-          → outputs: tasks[], reasoning, confidence
+          → injects poorly-rated tasks from FeedbackLog into prompt
+          → outputs: tasks[] (with estimated_hours + hours_pessimistic), reasoning, confidence
         RiskAgent + CriticAgent run in parallel (llama-3.1-8b each)
           → risk: score, risk_factors, challenges
           → critic: score/10, verdict (accept/revise), issues[], strengths[]
         if risk_score ≤ threshold AND verdict == "accept" → break
   → debate_log saved to PlanVersion.snapshot
-  → apply adaptive bias to estimated_hours
+  → apply adaptive bias to estimated_hours per category
+  → save hours_pessimistic into task.metadata_ for display
   → DAG builder: resolve name→UUID, cycle check, topological sort, CPM
   → constraint validator: deadline / budget / team capacity
   → carry over completed/in-progress tasks to new version
@@ -154,6 +161,7 @@ POST /plans/:id/generate?mode=accurate
 Celery Beat (every N minutes)
   → compute_drift(plan_id)
   → schedule_drift = slippage_hours / total_planned_hours
+       (tasks marked is_external_block are excluded from overdue count)
   → effort_drift   = (actual_hours − estimated_hours) / estimated_hours
   → scope_drift    = |current_task_count − v1_task_count| / v1_task_count
   → overall_drift  = 0.5×schedule + 0.3×effort + 0.2×scope
@@ -220,8 +228,8 @@ PlanPilot/
 │       ├── routes/
 │       │   ├── auth.py                     # register, login, refresh, logout
 │       │   ├── plans.py                    # CRUD, /generate, /complete, /archived
-│       │   │                               # /dag, /history, /reasoning, /versions
-│       │   ├── tasks.py
+│       │   │                               # /dag, /history, /reasoning, /report, /versions
+│       │   ├── tasks.py                    # CRUD + /feedback (good/bad rating)
 │       │   ├── execution.py                # log_event, compliance, bottlenecks
 │       │   ├── drift.py                    # metrics, history, events, replan
 │       │   ├── analytics.py                # summary, accuracy, velocity, weights
@@ -232,8 +240,9 @@ PlanPilot/
 │       │   ├── shared_memory.py            # Cross-agent state (goal, constraints,
 │       │   │                               # completed_tasks, iteration outputs)
 │       │   ├── multi_agent_orchestrator.py # Coordinates iterations, builds debate_log
-│       │   ├── planner_agent.py            # Generates task list; injects completed
-│       │   │                               # tasks + revision feedback each pass
+│       │   ├── planner_agent.py            # Generates task list (with hours_pessimistic);
+│       │   │                               # injects completed tasks, feedback patterns,
+│       │   │                               # and agent revision feedback each pass
 │       │   ├── risk_agent.py               # Scores risk, emits challenges
 │       │   ├── critic_agent.py             # Reviews plan quality, accept/revise
 │       │   ├── drift_agent.py              # Analyzes drift root cause
@@ -242,7 +251,8 @@ PlanPilot/
 │       │   ├── llm/
 │       │   │   └── groq_provider.py        # AsyncGroq client, complete/complete_json
 │       │   ├── planning/
-│       │   │   ├── task_planner.py         # Orchestrates generation + carry-over logic
+│       │   │   ├── task_planner.py         # Orchestrates generation + carry-over logic;
+│       │   │   │                           # saves hours_pessimistic into task.metadata_
 │       │   │   ├── dag_builder.py          # LLM output → DAG + CPM scheduling
 │       │   │   └── constraint_engine.py    # Deadline / budget / capacity checks
 │       │   ├── execution/
@@ -253,7 +263,7 @@ PlanPilot/
 │       │   ├── compliance/
 │       │   │   └── checker.py              # 5 enforcement rules
 │       │   ├── learning/
-│       │   │   └── adaptive_weights.py     # EMA upsert; triggered on task completion
+│       │   │   └── adaptive_weights.py     # EMA upsert; industry benchmarks as cold-start
 │       │   └── simulation/
 │       │       └── simulator.py            # Bot engineers, compressed-day steps
 │       ├── workers/
@@ -276,20 +286,20 @@ PlanPilot/
         │   └── plans/
         │       ├── page.tsx                # plan list (excludes completed)
         │       ├── new/page.tsx            # create plan + team members
-        │       └── [planId]/page.tsx       # plan detail (7 tabs + Mark Complete)
+        │       └── [planId]/page.tsx       # plan detail (7 tabs, Mark Complete, Report modal)
         ├── components/
         │   ├── planning/
-        │   │   ├── KanbanBoard.tsx         # 4-column board; skipped tasks hidden
+        │   │   ├── KanbanBoard.tsx         # 4-column board; confidence intervals, task ratings
         │   │   ├── DagVisualization.tsx    # ReactFlow DAG; stale-edge safe
         │   │   ├── TeamTab.tsx
         │   │   ├── PlanTemplates.tsx
         │   │   └── RegenerateModal.tsx     # mode selector (Fast/Accurate/Debate)
         │   ├── execution/
-        │   │   ├── TaskUpdateModal.tsx
+        │   │   ├── TaskUpdateModal.tsx     # external blocker toggle + compliance
         │   │   ├── ExecutionTimeline.tsx
         │   │   ├── DriftAlertBanner.tsx
         │   │   ├── DriftAnalyticsTab.tsx   # drift charts, debate log, AI learnings,
-        │   │   │                           # drift event log
+        │   │   │                           # industry avg badges, drift event log
         │   │   ├── ReplanningModal.tsx     # old→new hours diff, drift root cause
         │   │   └── ComplianceTab.tsx       # per-event compliance flags
         │   ├── simulation/
@@ -397,9 +407,11 @@ Register an account, create a plan, and you're running.
 | `GET` | `/api/v1/plans/archived` | List completed plans with summary stats |
 | `GET` | `/api/v1/plans/:id/dag` | Get task dependency graph (current version) |
 | `GET` | `/api/v1/plans/:id/reasoning` | Get debate log + planner reasoning for latest version |
+| `POST` | `/api/v1/plans/:id/report` | Generate LLM stakeholder report (prose, 4 sections) |
 | `GET` | `/api/v1/plans/:id/history` | Get tasks from previous versions grouped by version |
 | `GET` | `/api/v1/plans/:id/versions` | Get all plan version snapshots |
-| `POST` | `/api/v1/plans/:id/execution/tasks/:task_id/log` | Log task event (compliance enforced) |
+| `POST` | `/api/v1/plans/:id/tasks/:task_id/feedback` | Rate a task good/bad (stored in FeedbackLog) |
+| `POST` | `/api/v1/plans/:id/execution/tasks/:task_id/log` | Log task event; supports `is_external_block` + `external_block_reason` |
 | `GET` | `/api/v1/plans/:id/execution/compliance` | Get all compliance-flagged events |
 | `GET` | `/api/v1/plans/:id/execution/bottlenecks` | Get blocking tasks |
 | `GET` | `/api/v1/plans/:id/drift/metrics` | Get latest drift metrics |
@@ -482,7 +494,9 @@ After 3–4 days the drift alert fires and you can trigger adaptive replanning d
 
 ## Adaptive Learning
 
-The system learns your estimation patterns incrementally:
+The system learns your estimation patterns incrementally across three mechanisms:
+
+### Estimation weights (EMA)
 
 - **Trigger:** every time a task is marked `completed` with `actual_hours` logged
 - **What it computes:** `actual_hours / estimated_hours` ratio per task category
@@ -491,11 +505,22 @@ The system learns your estimation patterns incrementally:
   new_weight = 0.7 × old_weight + 0.3 × observed_ratio
   ```
 - **Activation:** weights apply to new plan estimates after **3+ observations** for a category
-- **Where it shows:**
-  - **Dashboard** — Estimation Insights card (appears once enough data exists)
-  - **Analytics tab → AI Learnings** — full breakdown with sample count and confidence
+- **Cold-start priors:** until 3 observations exist, industry benchmarks are used (dev +35%, research +50%, deploy +40%, etc.) and shown with an **"industry avg"** badge in the Analytics tab
 
-When regenerating a plan, these weights are automatically applied to `estimated_hours` for each task category before saving.
+### Task feedback loop
+
+Rate any task thumbs-up or thumbs-down directly on the Kanban card. Bad ratings are stored in `FeedbackLog` and injected into the planning prompt when regenerating — the planner is told to avoid similar patterns.
+
+### Confidence intervals
+
+The planner outputs `hours_pessimistic` (a P80 upper-bound estimate) alongside the standard estimate. These are saved per task and displayed on Kanban cards as **"8h →12h"**, giving a realistic best/worst-case range for each task.
+
+### Where it shows
+
+- **Dashboard** — Estimation Insights card (appears once enough data exists)
+- **Analytics tab → AI Learnings** — full breakdown with sample count, confidence, and industry avg badges
+
+When regenerating a plan, EMA weights are automatically applied to `estimated_hours` before saving.
 
 ---
 
@@ -578,7 +603,10 @@ Tests cover: planning service, DAG builder, CPM, compliance checker, drift detec
 
 **Estimation insights not appearing on dashboard**
 - Insights require at least 3 completed tasks with `actual_hours` logged (per category).
-- Log a task event with `new_status: completed` and an `actual_hours` value to accumulate data.
+- Before 3 observations exist, industry-average benchmarks are shown with an "industry avg" badge.
+
+**"Report" button returns an error**
+- The report endpoint calls the Groq API inline (not via Celery). If the API key is invalid or rate-limited, the endpoint returns a 503. Check `GROQ_API_KEY` and retry.
 
 **Port conflicts**
 - If ports 3000, 8000, 5432, or 6379 are in use, update the `ports` mappings in `docker-compose.yml`.

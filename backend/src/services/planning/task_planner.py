@@ -12,7 +12,7 @@ from src.services.planning.dag_builder import build_dag
 from src.services.planning.constraint_engine import validate_constraints
 from src.models.plan import Plan, PlanVersion
 from src.models.task import Task, TaskDependency
-from src.models.learning import AdaptiveWeight
+from src.models.learning import AdaptiveWeight, FeedbackLog
 from src.models.team import TeamMember
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,7 @@ async def generate_plan(plan_id: str, db: AsyncSession, mode: PlanningMode = "ac
     adaptive_context = await _load_adaptive_context(str(plan.user_id), db)
     team_context = await _load_team_context(plan_id, db)
     completed_tasks = await _load_completed_tasks(plan_id, plan.current_version, db)
+    feedback_context = await _load_feedback_context(str(plan.user_id), db)
 
     orchestrator = MultiAgentOrchestrator(mode=mode)
     try:
@@ -38,6 +39,7 @@ async def generate_plan(plan_id: str, db: AsyncSession, mode: PlanningMode = "ac
             adaptive_context=adaptive_context,
             team_context=team_context,
             completed_tasks=completed_tasks,
+            feedback_context=feedback_context,
         )
     except Exception:
         logger.exception("Orchestrator failed for plan_id=%s", plan_id)
@@ -54,6 +56,8 @@ async def generate_plan(plan_id: str, db: AsyncSession, mode: PlanningMode = "ac
 
     weights = await _get_weights(str(plan.user_id), db)
     raw_tasks = _apply_adaptive_bias(raw_tasks, weights)
+
+    pessimistic_map = {t.get("name"): t.get("hours_pessimistic") for t in raw_tasks}
 
     try:
         scheduled_tasks, critical_path_ids = build_dag(raw_tasks)
@@ -123,7 +127,10 @@ async def generate_plan(plan_id: str, db: AsyncSession, mode: PlanningMode = "ac
             planned_start=st.planned_start,
             planned_end=st.planned_end,
             is_on_critical_path=st.is_on_critical_path,
-            metadata_={"risk_factors": orch_result.risk_factors if st.is_on_critical_path else []},
+            metadata_={
+                "risk_factors": orch_result.risk_factors if st.is_on_critical_path else [],
+                "hours_pessimistic": pessimistic_map.get(st.name),
+            },
         ))
 
     await db.flush()
@@ -191,16 +198,55 @@ async def _load_team_context(plan_id: str, db: AsyncSession) -> str:
 
 
 async def _load_adaptive_context(user_id: str, db: AsyncSession) -> str:
+    from src.services.learning.adaptive_weights import INDUSTRY_BENCHMARKS
     weights = await _get_weights(user_id, db)
-    if not weights:
-        return "No historical data yet — use standard estimates."
+    user_keys = {w.key for w in weights if w.sample_count >= 3}
+
     lines = []
     for w in weights:
         if w.sample_count >= 3:
             bias = (w.value - 1.0) * 100
             direction = "over" if bias > 0 else "under"
-            lines.append(f"- Historically {direction}estimates '{w.key}' tasks by {abs(bias):.0f}%")
-    return "\n".join(lines) if lines else "Insufficient historical data for adjustments."
+            lines.append(f"- Your projects {direction}estimate '{w.key.replace('category_bias_', '')}' tasks by {abs(bias):.0f}% on average")
+
+    # Fill remaining categories from industry benchmarks (cold-start)
+    for key, value in INDUSTRY_BENCHMARKS.items():
+        category = key.replace("category_bias_", "")
+        if key not in user_keys:
+            bias = (value - 1.0) * 100
+            direction = "over" if bias > 0 else "under"
+            lines.append(f"- Industry average: '{category}' tasks {direction}estimated by {abs(bias):.0f}% (cold-start prior)")
+
+    return "\n".join(lines) if lines else "No historical data — use standard estimates."
+
+
+async def _load_feedback_context(user_id: str, db: AsyncSession) -> str:
+    """Returns patterns from user-rated tasks to guide the planner away from past mistakes."""
+    result = await db.execute(
+        select(FeedbackLog, Task.name, Task.category)
+        .join(Task, Task.id == FeedbackLog.task_id)
+        .where(
+            FeedbackLog.source == "user",
+            FeedbackLog.field == "rating",
+            FeedbackLog.new_value == "bad",
+            Task.plan_id.in_(
+                select(Plan.id).where(Plan.user_id == uuid.UUID(user_id))
+            ),
+        )
+        .order_by(FeedbackLog.created_at.desc())
+        .limit(20)
+    )
+    rows = result.all()
+    if not rows:
+        return ""
+    seen: set[str] = set()
+    lines = []
+    for _, name, category in rows:
+        key = f"{category}:{name}"
+        if key not in seen:
+            seen.add(key)
+            lines.append(f"- '{name}' ({category}) was flagged as poorly estimated in a past plan")
+    return "USER FEEDBACK — tasks previously flagged as problematic (avoid similar patterns):\n" + "\n".join(lines)
 
 
 async def _load_completed_tasks(plan_id: str, current_version: int, db: AsyncSession) -> list[dict]:

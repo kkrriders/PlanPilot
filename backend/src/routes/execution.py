@@ -10,6 +10,7 @@ from src.models.user import User
 from src.models.plan import Plan
 from src.models.task import Task
 from src.models.execution import ExecutionLog, Checkpoint
+from src.models.task import Task
 from src.schemas.execution import LogEventCreate, ExecutionLogOut, CheckpointCreate, CheckpointOut
 from src.services.execution.tracker import log_event, get_timeline
 from src.services.compliance.checker import run_compliance_checks, split_violations
@@ -75,6 +76,28 @@ async def log_task_event(
         actual_hours=body.actual_hours,
     )
     await db.commit()
+
+    # Tag external blocks on the task so drift detector can skip them
+    if body.event_type == "blocked" and body.is_external_block:
+        task_result = await db.execute(select(Task).where(Task.id == task_id))
+        task = task_result.scalar_one_or_none()
+        if task:
+            meta = dict(task.metadata_ or {})
+            meta["is_external_block"] = True
+            meta["external_block_reason"] = body.external_block_reason
+            task.metadata_ = meta
+            await db.commit()
+
+    # Clear external block flag when task resumes or completes
+    if body.new_status in ("in_progress", "completed"):
+        task_result = await db.execute(select(Task).where(Task.id == task_id))
+        task = task_result.scalar_one_or_none()
+        if task and (task.metadata_ or {}).get("is_external_block"):
+            meta = dict(task.metadata_)
+            meta.pop("is_external_block", None)
+            meta.pop("external_block_reason", None)
+            task.metadata_ = meta
+            await db.commit()
 
     # Update adaptive weights whenever a task is completed with actual hours
     if body.new_status == "completed" and body.actual_hours:

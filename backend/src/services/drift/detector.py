@@ -50,6 +50,7 @@ async def compute_drift(plan_id: str, db: AsyncSession) -> DriftMetric:
     overdue = [
         t for t in tasks
         if t.planned_end and t.status not in ("completed", "skipped", "failed")
+        and not (t.metadata_ or {}).get("is_external_block")
         and (t.planned_end if t.planned_end.tzinfo else t.planned_end.replace(tzinfo=timezone.utc)) < now
     ]
     # Overdue tasks contribute their full estimated duration as slippage

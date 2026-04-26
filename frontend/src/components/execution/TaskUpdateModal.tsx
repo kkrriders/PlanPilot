@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { X, Play, CheckCircle, AlertCircle, Ban, MessageSquare, Link, ShieldAlert, ShieldCheck, Clock } from 'lucide-react'
+import { X, Play, CheckCircle, AlertCircle, Ban, MessageSquare, Link, ShieldAlert, ShieldCheck, Clock, ExternalLink } from 'lucide-react'
 import { executionService } from '../../services/executionService'
 import { useToastStore } from '../../store/toastStore'
 
@@ -35,6 +35,8 @@ export default function TaskUpdateModal({ planId, task, onClose, onUpdated }: Pr
   const [note, setNote] = useState('')
   const [evidenceUrl, setEvidenceUrl] = useState('')
   const [actualHours, setActualHours] = useState('')
+  const [isExternalBlock, setIsExternalBlock] = useState(false)
+  const [externalBlockReason, setExternalBlockReason] = useState('')
   const [loading, setLoading] = useState(false)
   const [serverErrors, setServerErrors] = useState<{ code: string; message: string }[]>([])
   const { toast } = useToastStore()
@@ -61,6 +63,8 @@ export default function TaskUpdateModal({ planId, task, onClose, onUpdated }: Pr
         new_status: selected.newStatus,
         evidence_url: evidenceUrl.trim() || undefined,
         actual_hours: actualHours ? parseFloat(actualHours) : undefined,
+        is_external_block: eventType === 'blocked' ? isExternalBlock : undefined,
+        external_block_reason: eventType === 'blocked' && isExternalBlock ? externalBlockReason.trim() || undefined : undefined,
       })
       toast(`Task "${task.label}" updated`, 'success')
       onUpdated()
@@ -127,6 +131,35 @@ export default function TaskUpdateModal({ planId, task, onClose, onUpdated }: Pr
               onChange={e => setPctComplete(Number(e.target.value))}
               className="w-full accent-blue-500"
             />
+          </div>
+        )}
+
+        {/* External blocker — shown when marking as blocked */}
+        {eventType === 'blocked' && (
+          <div className="mb-3 bg-yellow-950/30 border border-yellow-800/40 rounded-lg p-3">
+            <label className="flex items-center gap-2 text-xs text-yellow-300 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={isExternalBlock}
+                onChange={e => setIsExternalBlock(e.target.checked)}
+                className="accent-yellow-500 w-3.5 h-3.5"
+              />
+              <ExternalLink size={11} />
+              External blocker (outside team control)
+            </label>
+            {isExternalBlock && (
+              <input
+                value={externalBlockReason}
+                onChange={e => setExternalBlockReason(e.target.value)}
+                placeholder="e.g. Waiting for vendor API, pending stakeholder approval..."
+                className="w-full mt-2 bg-gray-800 border border-yellow-700/40 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-yellow-500 placeholder-gray-600"
+              />
+            )}
+            {isExternalBlock && (
+              <p className="text-[10px] text-yellow-600 mt-1">
+                External blockers are excluded from drift overdue penalty.
+              </p>
+            )}
           </div>
         )}
 

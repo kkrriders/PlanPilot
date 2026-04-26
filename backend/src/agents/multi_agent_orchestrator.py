@@ -66,6 +66,7 @@ class MultiAgentOrchestrator:
         adaptive_context: str = "",
         team_context: str = "",
         completed_tasks: list[dict] | None = None,
+        feedback_context: str = "",
     ) -> OrchestratorResult:
         memory = SharedMemory(
             plan_id=plan_id,
@@ -74,6 +75,7 @@ class MultiAgentOrchestrator:
             adaptive_context=adaptive_context,
             team_context=team_context,
             completed_tasks=completed_tasks or [],
+            feedback_context=feedback_context,
         )
 
         last_good_plan: AgentResult | None = None

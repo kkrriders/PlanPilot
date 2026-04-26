@@ -43,6 +43,7 @@ Return JSON:
       "description": "What needs to be done and why",
       "category": "design|dev|test|deploy|review|research|planning",
       "estimated_hours": 8.0,
+      "hours_pessimistic": 12.0,
       "priority": 2,
       "dependencies": ["name of predecessor task"],
       "assigned_to": "Exact team member name or null"
@@ -115,12 +116,12 @@ class PlannerAgent(BaseAgent):
         critic_out = memory.get("critic")
 
         if memory.iteration > 0 and (risk_out or critic_out):
-            feedback_section = _REVISION_SECTION.format(
+            revision_section = _REVISION_SECTION.format(
                 risk_challenges=json.dumps((risk_out or {}).get("challenges", []), indent=2),
                 critic_issues=json.dumps((critic_out or {}).get("issues", []), indent=2),
             )
         else:
-            feedback_section = ""
+            revision_section = ""
 
         limits = _compute_hard_limits(c)
 
@@ -137,9 +138,13 @@ class PlannerAgent(BaseAgent):
         else:
             completed_section = ""
 
+        user_feedback = (memory.feedback_context + "\n\n") if memory.feedback_context else ""
+        feedback_section = user_feedback + revision_section
+
         return _USER.format(
             goal=memory.goal,
             completed_section=completed_section,
+            feedback_section=feedback_section,
             deadline_days=limits["deadline_days"],
             team_size=limits["team_size"],
             budget_usd=c.get("budget_usd", "not specified"),
@@ -149,7 +154,6 @@ class PlannerAgent(BaseAgent):
             max_tasks=limits["max_tasks"],
             team_context=memory.team_context or "No team members defined.",
             adaptive_context=memory.adaptive_context or "No historical data.",
-            feedback_section=feedback_section,
         )
 
     def _parse_result(self, raw: dict) -> tuple[dict, float, str]:

@@ -29,6 +29,8 @@ export const planService = {
   getHistory: (id: string) => api.get<VersionHistory[]>(`/api/v1/plans/${id}/history`).then(r => r.data),
 
   getReasoning: (id: string) => api.get<PlanReasoning>(`/api/v1/plans/${id}/reasoning`).then(r => r.data),
+
+  generateReport: (id: string) => api.post<{ report: string; plan_id: string }>(`/api/v1/plans/${id}/report`).then(r => r.data),
 }
 
 export interface DebateEntry {

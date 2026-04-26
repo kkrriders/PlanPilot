@@ -14,6 +14,7 @@ class SharedMemory:
     adaptive_context: str = ""
     team_context: str = ""
     completed_tasks: list[dict] = field(default_factory=list)
+    feedback_context: str = ""
     agent_outputs: dict[str, Any] = field(default_factory=dict)
     iteration: int = 0
 
